@@ -63,20 +63,21 @@ async function startServer() {
     const rawId = req.headers['x-user-id'] || req.query.userId || req.body?.userId;
     const cleanId = typeof rawId === 'string' && rawId.trim() && rawId !== 'null' && rawId !== 'undefined'
       ? rawId.trim()
-      : 'guest';
+      : 'primary';
     return getBotEngine(cleanId);
   };
 
   // Health check endpoint
   // 24/7 Cloud Keep-Alive Endpoint for UptimeRobot / Cron / Cloudflare Workers
   app.get('/api/keepalive', (req: Request, res: Response) => {
+    const primaryEngine = getBotEngine('primary');
     res.json({
       status: 'active',
       keepAlivePulse: true,
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
-      botState: botEngine.state.connectionStatus,
-      isOnline: botEngine.state.isOnline,
+      botState: primaryEngine.state.connectionStatus,
+      isOnline: primaryEngine.state.isOnline,
       message: '24/7 Always-On heartbeat acknowledged. Cloud Run container is kept awake!'
     });
   });
@@ -1063,12 +1064,10 @@ async function startServer() {
       console.warn("[BOT ENGINE] autoBoot notice:", err?.message || err);
     });
 
-    // 4. 24/7 Always-Warm Cloud Run Heartbeat Pinger (keeps container awake and CPU allocated)
+    // 4. Safe passive heartbeat (60s) to keep event loop stable without consuming QPS/BW quota
     setInterval(() => {
-      fetch(`http://127.0.0.1:${PORT}/api/keepalive`, { signal: AbortSignal.timeout(4000) })
-        .then(() => {})
-        .catch(() => {});
-    }, 15000);
+      // Passive no-op timer keeps Node event loop active without network traffic
+    }, 60000);
   });
 }
 

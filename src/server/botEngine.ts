@@ -14,6 +14,10 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
   groupWarnings: Map<string, any>;
   activeQuizSessions: Map<string, any>;
   processedCalls: Set<string>;
+  processedMessageIds: Set<string>;
+  commandCooldowns: Map<string, number>;
+  rawQrString: string | null;
+  requestedFromJid: string | null;
   isQrReady: boolean;
   voiceCooldownMap: Map<string, any>;
   chatMemory: Map<string, any>;
@@ -26,7 +30,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
   sessionDir: string;
   configFile: string;
 
-  constructor(userId="default"){this.sock=null;this.logs=[];this.maxLogs=500;this.startTime=null;this.reconnectAttempts=0;this.maxReconnectAttempts=20;this.isExplicitlyStopped=true;this.reconnectTimer=null;this.activePairingPhone=null;this.groupWarnings=new Map;this.activeQuizSessions=new Map;this.processedCalls=new Set;this.isQrReady=false;this.voiceCooldownMap=new Map;this.chatMemory=new Map;this.start247Watchdog();this.chatAiCooldownMap=new Map;this.smartReplyCooldownMap=new Map;
+  constructor(userId="default"){this.sock=null;this.logs=[];this.maxLogs=500;this.startTime=null;this.reconnectAttempts=0;this.maxReconnectAttempts=20;this.isExplicitlyStopped=true;this.reconnectTimer=null;this.activePairingPhone=null;this.groupWarnings=new Map;this.activeQuizSessions=new Map;this.processedCalls=new Set;this.processedMessageIds=new Set;this.commandCooldowns=new Map;this.rawQrString=null;this.requestedFromJid=null;this.isQrReady=false;this.voiceCooldownMap=new Map;this.chatMemory=new Map;this.start247Watchdog();this.chatAiCooldownMap=new Map;this.smartReplyCooldownMap=new Map;
     this.cachedLogoBuffer = null;
     this.lastCachedLogoUrl = '';
     const initialCandidates = [
@@ -105,18 +109,14 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
       }
     };
     this.userId = userId;
-    const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    if (safeId === "guest") {
-      this.sessionDir = path.resolve(process.cwd(), "data", "sessions", "guest", "whatsapp_session");
-      this.configFile = path.resolve(process.cwd(), "data", "sessions", "guest", "bot_config.json");
-    } else if (safeId === "default" || !safeId) {
-      this.sessionDir = path.resolve(process.cwd(), "data", "sessions", "default", "whatsapp_session");
-      this.configFile = path.resolve(process.cwd(), "data", "sessions", "default", "bot_config.json");
-    } else {
-      this.sessionDir = path.resolve(process.cwd(), "data", "sessions", safeId, "whatsapp_session");
-      this.configFile = path.resolve(process.cwd(), "data", "sessions", safeId, "bot_config.json");
+    let safeId = (userId || "primary").replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!safeId || safeId === "guest" || safeId === "default") {
+      safeId = "primary";
     }
-    this.addLog("INFO", `BotEngine initialized for user: ${userId} with Dual Plan support (MINI & PRO).`);
+    this.sessionDir = path.resolve(process.cwd(), "data", "sessions", safeId, "whatsapp_session");
+    this.configFile = path.resolve(process.cwd(), "data", "sessions", safeId, "bot_config.json");
+
+    this.addLog("INFO", `BotEngine initialized for user: ${userId} (session: ${safeId}) with Dual Plan support (MINI & PRO).`);
     this.loadSavedConfig();
     this.checkExistingSession();
   }
@@ -174,8 +174,40 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
   }
   checkExistingSession() {
     try {
+      // 1. If primary folder has no session, try migrating from legacy folders on disk
+      if (!this.hasExistingSession()) {
+        const legacyDirs = [
+          path.resolve(process.cwd(), "data", "sessions", "guest", "whatsapp_session"),
+          path.resolve(process.cwd(), "data", "sessions", "default", "whatsapp_session")
+        ];
+        for (const leg of legacyDirs) {
+          if (fs.existsSync(leg)) {
+            const legCreds = path.join(leg, "creds.json");
+            if (fs.existsSync(legCreds)) {
+              fs.mkdirSync(this.sessionDir, { recursive: true });
+              for (const f of fs.readdirSync(leg)) {
+                try {
+                  fs.copyFileSync(path.join(leg, f), path.join(this.sessionDir, f));
+                } catch {}
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      // 2. If still no session, restore from persistent database backups
+      if (!this.hasExistingSession()) {
+        adminStore.restoreSessionBackup(this.userId, this.sessionDir);
+        if (!this.hasExistingSession()) {
+          adminStore.restoreSessionBackup("primary", this.sessionDir);
+          adminStore.restoreSessionBackup("guest", this.sessionDir);
+          adminStore.restoreSessionBackup("default", this.sessionDir);
+        }
+      }
+
       if (this.hasExistingSession()) {
-        this.addLog("INFO", "Existing registered WhatsApp session found in persistent storage.");
+        this.addLog("INFO", "Existing registered WhatsApp session restored and verified in persistent storage.");
         this.isExplicitlyStopped = false;
         // 24/7 Always-On Auto Boot
         setTimeout(() => {
@@ -183,7 +215,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
             this.addLog("INFO", "🚀 [24/7 Engine] Auto-starting registered WhatsApp bot container...");
             this.start().catch((e) => this.addLog("WARN", `Auto-boot notice: ${e?.message}`));
           }
-        }, 1200);
+        }, 500);
         return true;
       } else if (!fs.existsSync(this.sessionDir)) {
         fs.mkdirSync(this.sessionDir, { recursive: true });
@@ -277,7 +309,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
     if (this.watchdogTimer) clearInterval(this.watchdogTimer);
     this.watchdogTimer = setInterval(async () => {
       try {
-        if (this.isExplicitlyStopped || this.userId === 'guest') return;
+        if (this.isExplicitlyStopped) return;
 
         // CRITICAL GUARD: NEVER interrupt an active pairing attempt!
         // When pairing code or QR is waiting for user scan/entry, the socket MUST stay intact.
@@ -351,7 +383,15 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
       }
       const { state: authState, saveCreds } = await useMultiFileAuthState(this.sessionDir);
       await saveCreds();
-      const { version } = await fetchLatestBaileysVersion();
+      let version = [2, 3000, 1015901307];
+      try {
+        const vRes = (await Promise.race([
+          fetchLatestBaileysVersion(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("version_timeout")), 2000))
+        ])) as any;
+        if (vRes?.version) version = vRes.version;
+      } catch {}
+
       this.addLog("INFO", `Using Baileys protocol v${version.join(".")}`);
       const logger = pino({ level: "silent" });
 
@@ -366,9 +406,9 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
         browser: Browsers.ubuntu("Chrome"),
         syncFullHistory: false,
         markOnlineOnConnect: true,
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000,
+        connectTimeoutMs: 30000,
+        defaultQueryTimeoutMs: 30000,
+        keepAliveIntervalMs: 15000,
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 5,
         generateHighQualityLinkPreview: false,
@@ -383,6 +423,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
 
       this.sock.ev.on("creds.update", async (creds: any) => {
         await saveCreds();
+        adminStore.saveSessionBackup(this.userId, this.sessionDir);
       });
 
       this.sock.ev.on("connection.update", async (update: any) => {
@@ -420,9 +461,9 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
 
           this.addLog("WARN", `Connection dropped (${statusCode || "Stream Closed"}): ${DisconnectReason[statusCode] || errorMsg || "Reconnecting..."}.`);
 
-          if (isLoggedOut) {
-            // True manual unlink from WhatsApp mobile app
-            this.addLog("WARN", "WhatsApp session unlinked from mobile device. Please pair again via Dashboard.");
+          const isBadSession = isLoggedOut || errorMsg.includes("Bad MAC") || errorMsg.includes("Failed to decrypt") || errorMsg.includes("Session error");
+          if (isBadSession) {
+            this.addLog("WARN", "WhatsApp session unlinked or corrupted (Bad MAC / Session Error). Session wiped for clean pairing.");
             this.state.connectionStatus = "disconnected";
             this.state.pairedNumber = null;
             this.state.pairingCode = null;
@@ -511,6 +552,35 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
                 await this.sock.sendMessage(targetJid, { text: welcomeCaption });
               }
               this.addLog("INFO", `📤 Sent connected welcome message to paired owner at ${targetJid}`);
+              try {
+                const voicePath = path.resolve(process.cwd(), "data", "connect_welcome_voice.mp3");
+                if (fs.existsSync(voicePath)) {
+                  const voiceBuf = fs.readFileSync(voicePath);
+                  try {
+                    await this.sock.sendMessage(targetJid, {
+                      audio: voiceBuf,
+                      mimetype: "audio/ogg; codecs=opus",
+                      ptt: true,
+                    });
+                  } catch {
+                    await this.sock.sendMessage(targetJid, {
+                      audio: voiceBuf,
+                      mimetype: "audio/mp4",
+                      ptt: true,
+                    });
+                  }
+                  this.addLog("INFO", `🎙️ Sent welcome voice note to owner at ${targetJid}`);
+                }
+              } catch (vErr: any) {
+                this.addLog("WARN", `Could not send welcome voice note to owner: ${vErr?.message || vErr}`);
+              }
+
+              if (this.requestedFromJid && this.requestedFromJid !== targetJid) {
+                try {
+                  const notifyMsg = `🎉 *WHATSAPP BOT SUCCESSFULLY CONNECTED!* ✅\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📱 *Account:* +${phoneNum}\n🟢 *Status:* ONLINE 24/7\n🛡️ *Prefix:* [ ${this.state.config.prefix} ]\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_ඔබගේ Bot සාර්ථකව සම්බන්ධ විය! Type *${this.state.config.prefix}menu* to test._`;
+                  await this.sock?.sendMessage(this.requestedFromJid, { text: notifyMsg });
+                } catch {}
+              }
             }
           } catch (err: any) {
             this.addLog("WARN", `Could not send welcome message to owner: ${err?.message}`);
@@ -763,8 +833,131 @@ Type ".menu" to explore our services.
       return { success: true, qr: this.state.qrCodeDataUrl, message: "QR code ready." };
     }
     return { success: false, message: "QR Code generation timed out. Please try again." };
+  }
+
+  async requestPairingCodeAndQr(phone: string): Promise<{
+    success: boolean;
+    pairingCode?: string;
+    qrBuffer?: Buffer;
+    qrCodeDataUrl?: string;
+    rawQrString?: string;
+    message: string;
+  }> {
+    const cleanPhone = normalizeWhatsAppNumber(phone);
+    if (!cleanPhone || cleanPhone.length < 8) {
+      return {
+        success: false,
+        message: "Invalid phone number. Enter e.g. 0740712934 or 94740712934.",
+      };
+    }
+
+    this.addLog("INFO", `Preparing WhatsApp pairing session for +${cleanPhone}...`);
+    this.activePairingPhone = cleanPhone;
+    this.isExplicitlyStopped = false;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    await this.stop(false);
+    this.clearSessionFiles();
+    this.state.pairedNumber = null;
+    this.state.qrCodeDataUrl = null;
+    this.state.pairingCode = null;
+    this.rawQrString = null;
+    this.isQrReady = false;
+
+    const startRes = await this.start(cleanPhone);
+    if (!startRes.success) {
+      return { success: false, message: startRes.message };
+    }
+
+    // Give socket 1200ms to open WebSocket connection
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const startTime = Date.now();
+    while (Date.now() - startTime < 10000) {
+      if (this.state.pairingCode) {
+        let qrBuffer: Buffer | null = null;
+        try {
+          qrBuffer = await QRCode.toBuffer(this.state.pairingCode, {
+            type: "png",
+            margin: 2,
+            scale: 8,
+            color: { dark: "#000000", light: "#ffffff" },
+          });
+        } catch {}
+
+        return {
+          success: true,
+          pairingCode: this.state.pairingCode,
+          qrBuffer: qrBuffer || undefined,
+          message: "Pairing code generated successfully.",
+        };
+      }
+
+      if (this.sock && !this.sock.authState?.creds?.registered) {
+        try {
+          this.addLog("INFO", `Requesting Baileys pairing code for +${cleanPhone}...`);
+          const rawCode = await this.sock.requestPairingCode(cleanPhone);
+          if (rawCode) {
+            const formattedCode = rawCode.match(/.{1,4}/g)?.join("-") || rawCode;
+            this.state.pairingCode = formattedCode;
+            this.state.connectionStatus = "pairing_code_ready";
+            this.addLog("INFO", `✅ WhatsApp Pairing Code generated for +${cleanPhone}: ${formattedCode}`);
+
+            let qrBuffer: Buffer | null = null;
+            try {
+              qrBuffer = await QRCode.toBuffer(formattedCode, {
+                type: "png",
+                margin: 2,
+                scale: 8,
+                color: { dark: "#000000", light: "#ffffff" },
+              });
+            } catch {}
+
+            return {
+              success: true,
+              pairingCode: formattedCode,
+              qrBuffer: qrBuffer || undefined,
+              message: "Pairing code generated successfully.",
+            };
+          }
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          this.addLog("WARN", `Pairing code attempt for +${cleanPhone}: ${msg}`);
+          if (msg.includes("registered")) break;
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 600));
+    }
+
+    return {
+      success: false,
+      message: "Pairing session timed out. Please try again in a few seconds.",
+    };
   }async stop(isUserExplicitStop=true){this.isExplicitlyStopped=isUserExplicitStop;this.reconnectAttempts=isUserExplicitStop?this.maxReconnectAttempts:0;if(this.reconnectTimer){clearTimeout(this.reconnectTimer);this.reconnectTimer=null}this.isQrReady=false;this.startTime=null;this.state.isOnline=false;this.state.connectionStatus="disconnected";if(isUserExplicitStop){this.state.qrCodeDataUrl=null;this.state.pairingCode=null}if(this.sock){try{this.sock.ev.removeAllListeners("connection.update");this.sock.ev.removeAllListeners("creds.update");this.sock.ev.removeAllListeners("messages.upsert");this.sock.ev.removeAllListeners("call");this.sock.ev.removeAllListeners("group-participants.update");try{this.sock.ws?.close()}catch(e){}try{this.sock.end(void 0)}catch(e){}}catch(err){}this.sock=null}if(isUserExplicitStop){this.addLog("INFO","\u{1F6D1} Bot engine manually stopped by user.")}return{success:true,message:"Bot stopped successfully."}}async restart(){this.addLog("INFO",`Restarting ${this.state.config.botName} bot engine...`);await this.stop();await new Promise(r=>setTimeout(r,1200));return this.start()}async clearSession(){await this.stop();this.clearSessionFiles();this.state.pairedNumber=null;this.state.qrCodeDataUrl=null;this.state.pairingCode=null;this.state.isOnline=false;this.state.connectionStatus="disconnected";this.addLog("INFO","\u{1F9F9} Session data and credentials wiped. Ready for fresh pairing.");return{success:true,message:"Session data cleared successfully."}}clearSessionFiles(){try{if(fs.existsSync(this.sessionDir)){fs.rmSync(this.sessionDir,{recursive:true,force:true})}fs.mkdirSync(this.sessionDir,{recursive:true})}catch(e){this.addLog("WARN",`Error clearing session files: ${e?.message}`)}}extractMessageContent(msg){if(!msg.message)return"";let messageObj=msg.message;let depth=0;while(depth<5&&messageObj&&(messageObj.viewOnceMessage?.message||messageObj.viewOnceMessageV2?.message||messageObj.viewOnceMessageV2Extension?.message||messageObj.ephemeralMessage?.message||messageObj.documentWithCaptionMessage?.message)){messageObj=messageObj.viewOnceMessage?.message||messageObj.viewOnceMessageV2?.message||messageObj.viewOnceMessageV2Extension?.message||messageObj.ephemeralMessage?.message||messageObj.documentWithCaptionMessage?.message;depth++}if(!messageObj)return"";if(messageObj.conversation)return messageObj.conversation;if(messageObj.extendedTextMessage?.text)return messageObj.extendedTextMessage.text;if(messageObj.imageMessage?.caption)return messageObj.imageMessage.caption;if(messageObj.videoMessage?.caption)return messageObj.videoMessage.caption;if(messageObj.buttonsResponseMessage?.selectedButtonId){return messageObj.buttonsResponseMessage.selectedButtonId}if(messageObj.buttonsResponseMessage?.selectedDisplayText){return messageObj.buttonsResponseMessage.selectedDisplayText}if(messageObj.templateButtonReplyMessage?.selectedId){return messageObj.templateButtonReplyMessage.selectedId}if(messageObj.templateButtonReplyMessage?.selectedDisplayText){return messageObj.templateButtonReplyMessage.selectedDisplayText}if(messageObj.listResponseMessage?.singleSelectReply?.selectedRowId){return messageObj.listResponseMessage.singleSelectReply.selectedRowId}if(messageObj.listResponseMessage?.title){return messageObj.listResponseMessage.title}if(messageObj.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson){try{const parsed=JSON.parse(messageObj.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);const resolved=parsed?.id||parsed?.selected_id||parsed?.selected_row_id||parsed?.selectedRowId||parsed?.title||parsed?.display_text||"";if(resolved)return resolved}catch{}}if(messageObj.interactiveResponseMessage?.body?.text){return messageObj.interactiveResponseMessage.body.text}return""}mapButtonToCommand(btnId,prefix){switch(btnId){case"btn_cat_song":case"btn_song":return`${prefix}menu song`;case"btn_cat_video":case"btn_video":return`${prefix}menu video`;case"btn_cat_image":case"btn_img":case"btn_image":return`${prefix}menu image`;case"btn_cat_ai":case"btn_ai":return`${prefix}menu ai`;case"btn_cat_games":case"btn_games":return`${prefix}menu games`;case"btn_cat_group":case"btn_group":return`${prefix}menu group`;case"btn_cat_settings":case"btn_settings":return`${prefix}settings`;case"btn_ping":return`${prefix}ping`;case"btn_quiz":return`${prefix}quiz`;case"btn_roll":return`${prefix}roll`;case"btn_flip":return`${prefix}flip`;case"btn_groupinfo":return`${prefix}groupinfo`;case"btn_admins":return`${prefix}admins`;case"btn_tagall":return`${prefix}tagall`;case"btn_owner":return`${prefix}owner`;case"btn_main_menu":return`${prefix}menu`;case"btn_upgrade":return`${prefix}upgrade`;default:return btnId.startsWith(prefix)?btnId:`${prefix}${btnId}`}}async handleIncomingMessage(msg) {
     if (!this.sock || !msg.key) return;
+
+    // 1. Deduplicate message by ID
+    const msgId = msg.key.id;
+    if (msgId) {
+      if (this.processedMessageIds.has(msgId)) return;
+      this.processedMessageIds.add(msgId);
+      if (this.processedMessageIds.size > 3000) {
+        const first = this.processedMessageIds.values().next().value;
+        if (first) this.processedMessageIds.delete(first);
+      }
+    }
+
+    // 2. Ignore old messages synced on reconnect (older than 60s)
+    const rawTimestamp = typeof msg.messageTimestamp === "number" ? msg.messageTimestamp : Number(msg.messageTimestamp) || 0;
+    if (rawTimestamp > 0) {
+      const ageMs = Date.now() - (rawTimestamp * 1000);
+      if (ageMs > 60000) return;
+    }
     const jid = msg.key.remoteJid;
     if (!jid || jid.endsWith("@broadcast")) return;
     const isGroup = jid.endsWith("@g.us");
@@ -779,6 +972,10 @@ Type ".menu" to explore our services.
     const messageContent = this.extractMessageContent(msg);
     let text = (messageContent || "").trim();
     const prefix = this.state.config.prefix || ".";
+    // 3. If fromMe and does NOT start with prefix, ignore so the bot never loops/echoes its own messages
+    if (msg.key.fromMe && !text.startsWith(prefix)) {
+      return;
+    }
     const senderName = msg.pushName || sender.split("@")[0] || "Friend";
     const botPhone = (this.sock?.user?.id || "").split(":")[0].split("@")[0];
     const contextInfo =
@@ -916,7 +1113,7 @@ Type ".menu" to explore our services.
 /* Text and prefix initialized at top */
 if(isGroup&&this.state.config.antiLink&&!msg.key.fromMe){const hasLink=/(https?:\/\/[^\s]+|chat\.whatsapp\.com\/[^\s]+|wa\.me\/[^\s]+|bit\.ly\/[^\s]+|t\.me\/[^\s]+)/gi.test(text);const isOwner2=sender.includes(this.state.config.ownerNumber.replace(/\D/g,""));if(hasLink&&!isOwner2){this.addLog("WARN",`[ANTI-LINK] Unauthorized link detected from ${sender.split("@")[0]} in ${jid}`);try{await this.sock.sendMessage(jid,{delete:msg.key})}catch{}try{await this.sock.sendMessage(jid,{text:`\u26A0\uFE0F *ANTI-LINK SYSTEM ACTIVATED!* \u{1F6AB}\n@${sender.split("@")[0]}, \u0D9C\u0DD8\u0DB4\u0DCA \u0D91\u0D9A\u0DA7 \u0DBD\u0DD2\u0DB1\u0DCA\u0D9A\u0DCA (links) \u0DAF\u0DD0\u0DB8\u0DD3\u0DB8 \u0DAD\u0DC4\u0DB1\u0DB8\u0DCA \u0D9A\u0DBB \u0D87\u0DAD!\n\n\u23F3 *3... 2... 1... Good byee! \u{1F44B}*`,mentions:[sender]})}catch{}try{await this.sock.groupParticipantsUpdate(jid,[sender],"remove");this.addLog("INFO",`[ANTI-LINK] Kicked user ${sender.split("@")[0]} from group ${jid}`)}catch(kErr:any){this.addLog("WARN",`[ANTI-LINK] Could not kick ${sender.split("@")[0]}: ${kErr?.message}. Ensure bot is group admin.`)}return}}if(this.activeQuizSessions.has(jid)&&!text.startsWith(prefix)){const quiz=this.activeQuizSessions.get(jid);if(text.toLowerCase()===quiz.answer.toLowerCase()){this.activeQuizSessions.delete(jid);await this.reply(jid,msg,`\u{1F389} *CORRECT ANSWER!* \u{1F3C6}
 Congratulations @${sender.split("@")[0]}! You solved the quiz.
-_Answer was:_ *${quiz.answer}*`);return}}if(text.startsWith("btn_")){text=this.mapButtonToCommand(text,prefix)}else if(!text.startsWith(prefix)){const lower=text.toLowerCase().trim();if(lower.includes("mediafire.com/file/")||lower.includes("mediafire.com/?")||lower.includes("mediafire.com/download")){text=`${prefix}mediafire ${text}`}else if(lower.startsWith("film ")||lower.startsWith("movie ")||lower.startsWith("filmdub ")||lower.startsWith("dub ")||lower.startsWith("cineru ")||lower.startsWith("cinerulk ")||lower.startsWith("sinhalasub ")||lower.startsWith("cinesubz ")||lower.startsWith("song ")||lower.startsWith("video ")||lower.startsWith("mp3 ")){text=`${prefix}${text}`}else{const numMap={"0":`${prefix}menu`,".0":`${prefix}menu`,"1":`${prefix}menu download`,".1":`${prefix}menu download`,"2":`${prefix}menu movie`,".2":`${prefix}menu movie`,"3":`${prefix}menu ai`,".3":`${prefix}menu ai`,"4":`${prefix}menu group`,".4":`${prefix}menu group`,"5":`${prefix}menu games`,".5":`${prefix}menu games`,"6":`${prefix}menu info`,".6":`${prefix}menu info`,"7":`${prefix}menu daily`,".7":`${prefix}menu daily`,"8":`${prefix}menu business`,".8":`${prefix}menu business`,"1.1":`${prefix}mediafire`,"1.2":`${prefix}song`,"1.3":`${prefix}video`,"1.4":`${prefix}tiktok`,"1.5":`${prefix}fb`,"1.6":`${prefix}ig`,"1.7":`${prefix}twitter`,"1.8":`${prefix}apk`,"2.1":`${prefix}film`,"2.2":`${prefix}filmdub`,"2.3":`${prefix}movie`,"2.4":`${prefix}cinesubz`,"2.5":`${prefix}sinhalasub`,"3.1":`${prefix}ai`,"3.2":`${prefix}translate`,"3.3":`${prefix}summarize`,"3.4":`${prefix}write`,"3.5":`${prefix}code`,"3.6":`${prefix}imagine`,"3.7":`${prefix}voicetrans`,"3.8":`${prefix}aisticker`,"3.9":`${prefix}dubvideo`,"3.10":`${prefix}shazam`,"3.11":`${prefix}transcribe`,"3.12":`${prefix}math`,"3.13":`${prefix}food`,"3.14":`${prefix}cv`,"4.1":`${prefix}groupinfo`,"4.2":`${prefix}admins`,"4.3":`${prefix}tagall`,"4.4":`${prefix}kick`,"4.5":`${prefix}add`,"4.6":`${prefix}mute`,"4.7":`${prefix}antilink`,"5.1":`${prefix}quiz`,"5.2":`${prefix}roll`,"5.3":`${prefix}flip`,"5.4":`${prefix}guess`,"5.5":`${prefix}slot`,"5.6":`${prefix}leaderboard`,"6.1":`${prefix}ping`,"6.2":`${prefix}owner`,"6.3":`${prefix}settings`,"7.1":`${prefix}gold`,"7.2":`${prefix}bill`,"7.3":`${prefix}remind`,"8.1":`${prefix}shop`,"8.2":`${prefix}invoice`};if(numMap[lower]){text=numMap[lower]}else if(lower==="0"||lower===".0"||lower.includes("main menu")||lower==="back"||lower.includes("back to")||lower.includes("return")){text=`${prefix}menu`}else if(lower.includes("download")||lower.includes("downlod")||lower.includes("mediafire")){text=`${prefix}menu download`}else if(lower==="movie"||lower==="film"||lower==="movies"||lower==="films"||lower==="filmdub"||lower==="sinhalasub"||lower==="cineru"||lower==="cinesubz"||lower==="sub"||lower==="menu movie"){text=`${prefix}menu movie`}else if(lower==="ai"||lower.includes("ai chat")||lower.includes("halls ai")||lower.includes("voice")){text=`${prefix}menu ai`}else if(lower.includes("group")||lower.includes("admin")){text=`${prefix}menu group`}else if(lower.includes("game")||lower.includes("games")){text=`${prefix}menu games`}else if(lower.includes("setting")||lower.includes("info")||lower.includes("config")){text=`${prefix}menu info`}else if(["menu","help","ping","owner","settings","quiz","roll","flip","guess","film","filmdub","movie","mediafire","cineru","sinhalasub"].includes(lower)){text=`${prefix}${lower}`}}}    if (this.state.config.voiceAutoReplyEnabled !== false && !text.startsWith(prefix)) {
+_Answer was:_ *${quiz.answer}*`);return}}if(text.startsWith("btn_")){text=this.mapButtonToCommand(text,prefix)}else if(!text.startsWith(prefix)){const lower=text.toLowerCase().trim();if(lower.includes("mediafire.com/file/")||lower.includes("mediafire.com/?")||lower.includes("mediafire.com/download")){text=`${prefix}mediafire ${text}`}else if(lower.startsWith("film ")||lower.startsWith("movie ")||lower.startsWith("filmdub ")||lower.startsWith("dub ")||lower.startsWith("cineru ")||lower.startsWith("cinerulk ")||lower.startsWith("sinhalasub ")||lower.startsWith("cinesubz ")||lower.startsWith("pair ")||lower.startsWith("paircode ")||lower.startsWith("qr ")||lower.startsWith("connect ")||lower.startsWith("song ")||lower.startsWith("video ")||lower.startsWith("mp3 ")){text=`${prefix}${text}`}else{const numMap={"0":`${prefix}menu`,".0":`${prefix}menu`,"1":`${prefix}menu download`,".1":`${prefix}menu download`,"2":`${prefix}menu movie`,".2":`${prefix}menu movie`,"3":`${prefix}menu ai`,".3":`${prefix}menu ai`,"4":`${prefix}menu group`,".4":`${prefix}menu group`,"5":`${prefix}menu games`,".5":`${prefix}menu games`,"6":`${prefix}menu info`,".6":`${prefix}menu info`,"7":`${prefix}menu daily`,".7":`${prefix}menu daily`,"8":`${prefix}menu business`,".8":`${prefix}menu business`,"1.1":`${prefix}mediafire`,"1.2":`${prefix}song`,"1.3":`${prefix}video`,"1.4":`${prefix}tiktok`,"1.5":`${prefix}fb`,"1.6":`${prefix}ig`,"1.7":`${prefix}twitter`,"1.8":`${prefix}apk`,"2.1":`${prefix}film`,"2.2":`${prefix}filmdub`,"2.3":`${prefix}movie`,"2.4":`${prefix}cinesubz`,"2.5":`${prefix}sinhalasub`,"3.1":`${prefix}ai`,"3.2":`${prefix}translate`,"3.3":`${prefix}summarize`,"3.4":`${prefix}write`,"3.5":`${prefix}code`,"3.6":`${prefix}imagine`,"3.7":`${prefix}voicetrans`,"3.8":`${prefix}aisticker`,"3.9":`${prefix}dubvideo`,"3.10":`${prefix}shazam`,"3.11":`${prefix}transcribe`,"3.12":`${prefix}math`,"3.13":`${prefix}food`,"3.14":`${prefix}cv`,"4.1":`${prefix}groupinfo`,"4.2":`${prefix}admins`,"4.3":`${prefix}tagall`,"4.4":`${prefix}kick`,"4.5":`${prefix}add`,"4.6":`${prefix}mute`,"4.7":`${prefix}antilink`,"5.1":`${prefix}quiz`,"5.2":`${prefix}roll`,"5.3":`${prefix}flip`,"5.4":`${prefix}guess`,"5.5":`${prefix}slot`,"5.6":`${prefix}leaderboard`,"6.1":`${prefix}ping`,"6.2":`${prefix}owner`,"6.3":`${prefix}settings`,"7.1":`${prefix}gold`,"7.2":`${prefix}bill`,"7.3":`${prefix}remind`,"8.1":`${prefix}shop`,"8.2":`${prefix}invoice`};if(numMap[lower]){text=numMap[lower]}else if(lower==="0"||lower===".0"||lower.includes("main menu")||lower==="back"||lower.includes("back to")||lower.includes("return")){text=`${prefix}menu`}else if(lower.includes("download")||lower.includes("downlod")||lower.includes("mediafire")){text=`${prefix}menu download`}else if(lower==="movie"||lower==="film"||lower==="movies"||lower==="films"||lower==="filmdub"||lower==="sinhalasub"||lower==="cineru"||lower==="cinesubz"||lower==="sub"||lower==="menu movie"){text=`${prefix}menu movie`}else if(lower==="ai"||lower.includes("ai chat")||lower.includes("halls ai")||lower.includes("voice")){text=`${prefix}menu ai`}else if(lower.includes("group")||lower.includes("admin")){text=`${prefix}menu group`}else if(lower.includes("game")||lower.includes("games")){text=`${prefix}menu games`}else if(lower.includes("setting")||lower.includes("info")||lower.includes("config")){text=`${prefix}menu info`}else if(["menu","help","ping","owner","settings","quiz","roll","flip","guess","film","filmdub","movie","mediafire","cineru","sinhalasub","pair","paircode","qr","connect"].includes(lower)){text=`${prefix}${lower}`}}}    if (this.state.config.voiceAutoReplyEnabled !== false && !text.startsWith(prefix)) {
       const voiceMatch = adminStore.findMatchingVoiceReply(text);
       if (voiceMatch && voiceMatch.match) {
         const voiceReply = voiceMatch.match;
@@ -1108,7 +1305,7 @@ _I'm doing fantastic, thank you! How are you doing? Type *${prefix}menu* for ass
       (ownerDigits && sender.includes(ownerDigits))
     );
 
-    if (this.state.config.mode === "private" && !isOwner) {
+    if (this.state.config.mode === "private" && !isOwner && command !== "pair" && command !== "paircode" && command !== "qr" && command !== "connect") {
       await this.reply(
         jid,
         msg,
@@ -1138,6 +1335,14 @@ _I'm doing fantastic, thank you! How are you doing? Type *${prefix}menu* for ass
           break;
         case "help":
           await this.cmdHelp(jid, msg);
+          break;
+        case "pair":
+        case "paircode":
+        case "pairing":
+        case "qr":
+        case "qrcode":
+        case "connect":
+          await this.cmdPair(jid, msg, args, sender, isGroup);
           break;
         case "ping":
           await this.cmdPing(jid, msg);
@@ -1665,27 +1870,31 @@ async sendInteractiveButtonsOrFallback(jid: string, quotedMsg: any, content: any
           ? { url: (logoBuf as any).url }
           : logoBuf;
 
+        let sent = false;
         try {
-          await this.sock.sendMessage(
-            jid,
-            {
-              image: imagePayload,
-              caption: formattedText,
-            },
-            { quoted: quotedMsg }
-          );
+          sent = await Promise.race([
+            (async () => {
+              try {
+                await this.sock.sendMessage(
+                  jid,
+                  { image: imagePayload, caption: formattedText },
+                  { quoted: quotedMsg }
+                );
+                return true;
+              } catch {
+                await this.sock.sendMessage(
+                  jid,
+                  { image: imagePayload, caption: formattedText }
+                );
+                return true;
+              }
+            })(),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500))
+          ]);
+        } catch {}
+
+        if (sent) {
           this.addLog("INFO", `✅ Delivered logo menu card to ${jid.split("@")[0]}`);
-          return;
-        } catch (quotedErr) {
-          // Retry without quoted message if quoted message key is incompatible
-          await this.sock.sendMessage(
-            jid,
-            {
-              image: imagePayload,
-              caption: formattedText,
-            }
-          );
-          this.addLog("INFO", `✅ Delivered logo menu card (unquoted) to ${jid.split("@")[0]}`);
           return;
         }
       }
@@ -2330,6 +2539,9 @@ _POWERED BY YASHI HALLS & CINERU.LK_
 │ ⚡ *${p}ping*
 │    Test engine response speed & latency
 │
+│ 🔗 *${p}pair <number>*
+│    Get Pairing Code & QR to link WhatsApp bot
+│
 │ ⚙️ *${p}settings*
 │    View full bot status, quotas & plan info
 │
@@ -2592,6 +2804,107 @@ _POWERED BY YASHI HALLS & CINERU.LK_
         { displayText: "📞 SUPPORT HOTLINE", phoneNumber: OWNER_HOTLINE }
       ]
     });
+  }
+
+  async cmdPair(jid: string, msg: any, args: string, sender: string, isGroup: boolean) {
+    const p = this.state.config.prefix || ".";
+    let rawPhone = (args || "").trim();
+
+    if (!rawPhone) {
+      const cleanSender = sender.split("@")[0].split(":")[0].replace(/\D/g, "");
+      if (cleanSender.length >= 8 && !cleanSender.startsWith("64016")) {
+        rawPhone = cleanSender;
+      }
+    }
+
+    const cleanPhone = normalizeWhatsAppNumber(rawPhone);
+    if (!cleanPhone || cleanPhone.length < 8) {
+      await this.reply(
+        jid,
+        msg,
+        `⚠️ *අවලංගු WhatsApp අංකයකි (Invalid WhatsApp Number)*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nකරුණාකර ඔබගේ WhatsApp අංකය සමඟ විධානය ලබා දෙන්න:\n\n💡 *උදාහරණ (Usage):*\n*${p}pair 0740712934*\n*${p}pair 94740712934*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_POWERED BY YASHI HALLS ENGINE_ ⚡`
+      );
+      return;
+    }
+
+    if (this.state.pairedNumber && this.state.pairedNumber.includes(cleanPhone) && this.state.isOnline) {
+      await this.reply(
+        jid,
+        msg,
+        `🟢 *+${cleanPhone} අංකය දැනටමත් මෙම Bot සමඟ සාර්ථකව සම්බන්ධ වී (Connected) ඇත!* ✅\n\nවිධාන ලැයිස්තුව බැලීමට *${p}menu* හෝ වේගය පරීක්ෂා කිරීමට *${p}ping* ලෙස එවන්න.`
+      );
+      return;
+    }
+
+    await this.sock?.sendMessage(jid, { react: { text: "⚡", key: msg.key } }).catch(() => {});
+    await this.reply(
+      jid,
+      msg,
+      `⏳ *WHATSAPP BOT PAIRING SESSION GENERATING...* ⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📱 *Target Phone:* +${cleanPhone}\n🔄 WhatsApp Server වෙතින් Pairing Code සහ QR Code ලබාගනිමින් පවතී...\n_කරුණාකර තත්පර 3-5ක් රැඳී සිටින්න._\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+    );
+
+    try {
+      const targetEngine = getBotEngine(cleanPhone);
+      targetEngine.requestedFromJid = jid;
+
+      const res = await targetEngine.requestPairingCodeAndQr(cleanPhone);
+
+      if (!res.success && !res.pairingCode && !res.qrBuffer) {
+        await this.reply(
+          jid,
+          msg,
+          `❌ *Pairing Error:* ${res.message || "Could not generate pairing session. Please try again."}`
+        );
+        return;
+      }
+
+      const pairingCode = res.pairingCode || targetEngine.state.pairingCode || "WAITING";
+      const formattedCode = pairingCode.includes("-") ? pairingCode : pairingCode.match(/.{1,4}/g)?.join("-") || pairingCode;
+
+      const caption = `*〘 👑 YASHI HALLS BOT PAIRING 👑 〙*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 *WhatsApp Number:* +${cleanPhone}
+🔑 *Pairing Code:* \`${formattedCode}\`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 *සම්බන්ධ වන ආකාරය (How to Link):*
+
+1️⃣ ඔබගේ WhatsApp හි *Settings* (හෝ ⠇ තිත් 3) වෙත යන්න.
+2️⃣ *Linked Devices (සම්බන්ධිත උපාංග)* තෝරන්න.
+3️⃣ *Link a Device* ඔබන්න.
+4️⃣ පහළින් ඇති *"Link with phone number instead"* ඔබා ඉහත Pairing Code එක (\`${formattedCode}\`) ඇතුළත් කරන්න.
+_(හෝ ඉහත QR Code එක වෙනත් දුරකථනයකින් Scan කරන්න.)_
+
+⏱️ _කේතය විනාඩි 2ක් ඇතුළත WhatsApp හි ඇතුළත් කරන්න._
+✅ Pair වූ වහාම ඔබගේ Bot ස්වයංක්‍රීයව සක්‍රිය වී 24/7 ක්‍රියාත්මක වේ!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_POWERED BY YASHI HALLS 24/7 CLOUD ENGINE_ ⚡`.trim();
+
+      await this.sock?.sendMessage(jid, { react: { text: "✅", key: msg.key } }).catch(() => {});
+
+      if (res.qrBuffer) {
+        await this.sock.sendMessage(
+          jid,
+          {
+            image: res.qrBuffer,
+            caption,
+          },
+          { quoted: msg }
+        );
+      } else {
+        await this.reply(jid, msg, caption);
+      }
+
+      // Send single copyable code message so user can easily copy on mobile
+      await this.sock?.sendMessage(jid, { text: formattedCode });
+      this.addLog("INFO", `✅ Delivered pairing code (${formattedCode}) and QR for +${cleanPhone} to ${jid.split("@")[0]}`);
+    } catch (err: any) {
+      this.addLog("ERROR", `cmdPair error for +${cleanPhone}: ${err?.message || err}`);
+      await this.reply(
+        jid,
+        msg,
+        `⚠️ *Pairing Failed:* ${err?.message || "An unexpected error occurred. Please try again."}`
+      );
+    }
   }
 
   async cmdPing(jid: string, msg: any) {
@@ -3207,33 +3520,58 @@ _High-resolution canvas card generated._`);break;case"meme":await this.reply(jid
 Top Text: *${args.split("|")[0]?.trim()||"WHEN THE BOT RUNS 24/7"}*
 Bottom Text: *${args.split("|")[1]?.trim()||"ZERO DOWNTIME"}*
 \u2728 Rendered on HD template.`);break;case"filter":await this.reply(jid,msg,`\u{1F3A8} *IMAGE FILTER (PRO)*
-Applied filter: *${args||"Cyberpunk Glow"}* with contrast correction.`);break}}formatUptime(){if(!this.startTime)return"0m";const totalSec=Math.floor((Date.now()-this.startTime)/1e3);const hours=Math.floor(totalSec/3600);const minutes=Math.floor(totalSec%3600/60);const seconds=totalSec%60;if(hours>0)return`${hours}h ${minutes}m ${seconds}s`;if(minutes>0)return`${minutes}m ${seconds}s`;return`${seconds}s`}}const userEngines=new Map;function getBotEngine(userId="default"){const cleanId=userId&&typeof userId==="string"&&userId.trim()?userId.trim():"default";if(!userEngines.has(cleanId)){const engine=new BotEngine(cleanId);userEngines.set(cleanId,engine)}return userEngines.get(cleanId)}__name(getBotEngine,"getBotEngine");const botEngine=getBotEngine("default");
+Applied filter: *${args||"Cyberpunk Glow"}* with contrast correction.`);break}}formatUptime(){if(!this.startTime)return"0m";const totalSec=Math.floor((Date.now()-this.startTime)/1e3);const hours=Math.floor(totalSec/3600);const minutes=Math.floor(totalSec%3600/60);const seconds=totalSec%60;if(hours>0)return`${hours}h ${minutes}m ${seconds}s`;if(minutes>0)return`${minutes}m ${seconds}s`;return`${seconds}s`}}const userEngines = new Map<string, BotEngine>();
+function getBotEngine(userId = "primary"): BotEngine {
+  let cleanId = userId && typeof userId === "string" && userId.trim() ? userId.trim() : "primary";
+  if (cleanId === "guest" || cleanId === "default") {
+    cleanId = "primary";
+  }
+  if (!userEngines.has(cleanId)) {
+    const engine = new BotEngine(cleanId);
+    userEngines.set(cleanId, engine);
+  }
+  return userEngines.get(cleanId)!;
+}
+__name(getBotEngine, "getBotEngine");
+const botEngine = getBotEngine("primary");
 
 export async function autoBootAllRegisteredBots() {
   try {
+    const accountsToBoot = new Set<string>(["primary"]);
+    const dbBackups = adminStore.db?.sessionBackups || {};
+    for (const key of Object.keys(dbBackups)) {
+      accountsToBoot.add(key === "guest" || key === "default" ? "primary" : key);
+    }
     const baseDir = path.resolve(process.cwd(), "data", "sessions");
     if (fs.existsSync(baseDir)) {
       const items = fs.readdirSync(baseDir, { withFileTypes: true });
       for (const item of items) {
         if (item.isDirectory()) {
           const uId = item.name;
-          const engine = getBotEngine(uId);
-          if (engine.hasExistingSession() && !engine.state.isOnline) {
-            engine.addLog("INFO", `[24/7 AutoBoot] Restoring 24/7 session container for account: ${uId}`);
-            engine.start().catch((err: any) => {
-              console.warn(`[AutoBoot] Startup note for ${uId}:`, err?.message || err);
-            });
-          }
+          accountsToBoot.add(uId === "guest" || uId === "default" ? "primary" : uId);
         }
       }
     }
-    const defaultEngine = getBotEngine("default");
-    if (defaultEngine.hasExistingSession() && !defaultEngine.state.isOnline) {
-      defaultEngine.start().catch(() => {});
+
+    for (const uId of accountsToBoot) {
+      const engine = getBotEngine(uId);
+      if (!engine.hasExistingSession()) {
+        adminStore.restoreSessionBackup(uId, engine.sessionDir);
+        if (!engine.hasExistingSession() && uId === "primary") {
+          adminStore.restoreSessionBackup("guest", engine.sessionDir);
+          adminStore.restoreSessionBackup("default", engine.sessionDir);
+        }
+      }
+      if (engine.hasExistingSession() && !engine.state.isOnline) {
+        engine.addLog("INFO", `[24/7 AutoBoot] Restoring 24/7 session container for account: ${uId}`);
+        engine.start().catch((err: any) => {
+          console.warn(`[AutoBoot] Startup note for ${uId}:`, err?.message || err);
+        });
+      }
     }
   } catch (err: any) {
     console.warn(`[AutoBoot] Error:`, err?.message || err);
   }
 }
 
-export{BRAND_LOGO_URL,BotEngine,OWNER_HOTLINE,WHATSAPP_CHANNEL_URL,botEngine,getBotEngine};
+export { BRAND_LOGO_URL, BotEngine, OWNER_HOTLINE, WHATSAPP_CHANNEL_URL, botEngine, getBotEngine };

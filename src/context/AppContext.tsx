@@ -706,7 +706,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           generatedAt: Date.now(),
           expiresInSeconds: 120,
         });
-        await refreshBotStatus();
+        setServerBotState((prev: any) => prev ? { ...prev, pairingCode: data.code, connectionStatus: 'pairing_code_ready' } : ({ pairingCode: data.code, connectionStatus: 'pairing_code_ready' } as any));
         soundFX.playSuccess();
         triggerConfetti();
         addToast(`WhatsApp Pairing Code ready: ${data.code}`, 'success');
@@ -772,10 +772,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           data = await res.json();
         } catch {}
       }
+      if (data && data.success && data.qr) {
+        setServerBotState((prev: any) => prev ? { ...prev, qrCodeDataUrl: data.qr, connectionStatus: 'qr_ready' } : ({ qrCodeDataUrl: data.qr, connectionStatus: 'qr_ready' } as any));
+        soundFX.playSuccess();
+        return { success: true, message: 'QR Code ready.' };
+      }
       await refreshBotStatus();
-      // Poll a few times for QR code image
+      // Poll fallback for QR code image
       for (let i = 0; i < 8; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 800));
         const statusRes = await fetch('/api/bot/status', {
           headers: getBotHeaders(),
         });

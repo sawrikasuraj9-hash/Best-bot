@@ -33,15 +33,6 @@ import { ToastContainer } from './components/ToastContainer';
 const MainAppContent: React.FC = () => {
   const { isAuthenticated, activeTab } = useApp();
 
-  React.useEffect(() => {
-    const pinger = () => {
-      fetch('/api/keepalive').catch(() => {});
-    };
-    pinger();
-    const timer = setInterval(pinger, 15000);
-    return () => clearInterval(timer);
-  }, []);
-
   // STRICT AUTHENTICATION GATE:
   // "ලොග් වෙන්නෙ නැතුව සයිට් එකේ කිසි දෙයාක් කරන්න දෙන්න එපා"
   if (!isAuthenticated) {

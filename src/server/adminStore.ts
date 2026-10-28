@@ -500,6 +500,62 @@ class AdminStore {
     }
   }
 
+  saveSessionBackup(userId: string, sessionDir: string) {
+    try {
+      if (!fs.existsSync(sessionDir)) return;
+      const files = fs.readdirSync(sessionDir);
+      const backup: Record<string, string> = {};
+      for (const file of files) {
+        if (file.endsWith(".json")) {
+          const filePath = path.join(sessionDir, file);
+          const content = fs.readFileSync(filePath, "utf-8");
+          if (content && content.length > 0) {
+            backup[file] = content;
+          }
+        }
+      }
+      if (Object.keys(backup).length > 0) {
+        if (!this.db.sessionBackups) this.db.sessionBackups = {};
+        const safeKey = (userId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+        this.db.sessionBackups[safeKey] = backup;
+        this.saveDatabase(this.db);
+      }
+    } catch (err: any) {
+      console.warn("[AdminStore] Session backup save failed:", err?.message);
+    }
+  }
+
+  restoreSessionBackup(userId: string, sessionDir: string): boolean {
+    try {
+      const safeKey = (userId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const backup = this.db.sessionBackups?.[safeKey];
+      if (!backup || typeof backup !== "object") return false;
+      fs.mkdirSync(sessionDir, { recursive: true });
+      let restoredCount = 0;
+      for (const [fileName, content] of Object.entries(backup)) {
+        if (typeof content === "string" && content.trim()) {
+          const targetPath = path.join(sessionDir, fileName);
+          fs.writeFileSync(targetPath, content, "utf-8");
+          restoredCount++;
+        }
+      }
+      return restoredCount > 0;
+    } catch (err: any) {
+      console.warn("[AdminStore] Session backup restore failed:", err?.message);
+      return false;
+    }
+  }
+
+  deleteSessionBackup(userId: string) {
+    try {
+      const safeKey = (userId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+      if (this.db.sessionBackups && this.db.sessionBackups[safeKey]) {
+        delete this.db.sessionBackups[safeKey];
+        this.saveDatabase(this.db);
+      }
+    } catch {}
+  }
+
   findMatchingVoiceReply(incomingText: string, customerId?: string) {
     if (!incomingText || typeof incomingText !== "string") return { match: null };
     const cleanText = incomingText.trim().toLowerCase().replace(/^[!./#]+/, "").trim();

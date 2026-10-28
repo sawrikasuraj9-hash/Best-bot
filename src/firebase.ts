@@ -12,7 +12,7 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { 
-  initializeFirestore,
+  getFirestore,
   doc, 
   getDoc, 
   setDoc, 
@@ -29,10 +29,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with forced long polling for 100% reliable connections through Cloud Run & iframe proxies
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
