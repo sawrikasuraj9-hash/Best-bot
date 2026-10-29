@@ -386,14 +386,15 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
       }
       const { state: authState, saveCreds } = await useMultiFileAuthState(this.sessionDir);
       await saveCreds();
-      let version = [2, 3000, 1015901307];
+      let version = [2, 3000, 1017531287];
       try {
         const vRes = (await Promise.race([
           fetchLatestBaileysVersion(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("version_timeout")), 2000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("version_timeout")), 4000))
         ])) as any;
         if (vRes?.version) version = vRes.version;
       } catch {}
+
 
       this.addLog("INFO", `Using Baileys protocol v${version.join(".")}`);
       const logger = pino({ level: "silent" });
@@ -437,9 +438,26 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
           try {
             const dataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 7 });
             this.state.qrCodeDataUrl = dataUrl;
-            this.addLog("INFO", "QR code generated and ready for WhatsApp scan.");
+            this.addLog("INFO", "✅ QR code generated and ready for WhatsApp scan.");
           } catch (err) {
             this.addLog("ERROR", "Failed to generate QR Code data URL.");
+          }
+
+          // Trigger pairing code as soon as QR key exchange frame is ready on socket
+          if (this.activePairingPhone && !this.state.pairingCode && this.sock && !authState.creds.registered) {
+            try {
+              const phoneToPair = this.activePairingPhone;
+              this.addLog("INFO", `⚡ Requesting Baileys pairing code for +${phoneToPair}...`);
+              const rawCode = await this.sock.requestPairingCode(phoneToPair);
+              if (rawCode) {
+                const formattedCode = rawCode.match(/.{1,4}/g)?.join("-") || rawCode;
+                this.state.pairingCode = formattedCode;
+                this.state.connectionStatus = "pairing_code_ready";
+                this.addLog("INFO", `✅ WhatsApp Pairing Code generated for +${phoneToPair}: ${formattedCode}`);
+              }
+            } catch (err: any) {
+              this.addLog("INFO", `Waiting for WhatsApp socket readiness (+${this.activePairingPhone}): ${err?.message || err}`);
+            }
           }
         }
 
@@ -729,8 +747,41 @@ Type ".menu" to explore our services.
         message: "Invalid phone number. Enter e.g. 0740712934 or 94740712934.",
       };
     }
-    this.addLog("INFO", `Preparing fresh WhatsApp pairing session for +${cleanPhone}...`);
+
+    // 1. If pairing code for this number is already generated, return it immediately
+    if (this.state.pairingCode && this.activePairingPhone === cleanPhone && this.state.connectionStatus === "pairing_code_ready") {
+      return {
+        success: true,
+        code: this.state.pairingCode,
+        message: "Pairing code generated successfully.",
+      };
+    }
+
     this.activePairingPhone = cleanPhone;
+
+    // 2. If an active socket is already handshaken and waiting (and not registered), request pairing code directly
+    if (this.sock && !this.hasExistingSession() && (this.isQrReady || this.state.qrCodeDataUrl)) {
+      try {
+        this.addLog("INFO", `⚡ Direct pairing code request on active socket for +${cleanPhone}...`);
+        const rawCode = await this.sock.requestPairingCode(cleanPhone);
+        if (rawCode) {
+          const formattedCode = rawCode.match(/.{1,4}/g)?.join("-") || rawCode;
+          this.state.pairingCode = formattedCode;
+          this.state.connectionStatus = "pairing_code_ready";
+          this.addLog("INFO", `✅ WhatsApp Pairing Code generated for +${cleanPhone}: ${formattedCode}`);
+          return {
+            success: true,
+            code: formattedCode,
+            message: "Pairing code generated successfully. Enter this code on your WhatsApp Linked Devices.",
+          };
+        }
+      } catch (err: any) {
+        this.addLog("INFO", `Notice during direct pairing attempt: ${err?.message || err}. Starting fresh socket...`);
+      }
+    }
+
+    // 3. Otherwise, restart fresh socket for pairing
+    this.addLog("INFO", `Preparing fresh WhatsApp pairing session for +${cleanPhone}...`);
     this.isExplicitlyStopped = false;
     this.reconnectAttempts = 0;
     if (this.reconnectTimer) {
@@ -750,10 +801,11 @@ Type ".menu" to explore our services.
       return { success: false, message: res.message };
     }
 
-    // Await socket handshake and request pairing code up to 18 seconds
-    await new Promise((r) => setTimeout(r, 1200));
+    // Wait for pairing code generation up to 15 seconds
     const startTime = Date.now();
-    while (Date.now() - startTime < 18000) {
+    let attemptedDirect = false;
+
+    while (Date.now() - startTime < 15000) {
       if (this.state.pairingCode) {
         return {
           success: true,
@@ -761,9 +813,11 @@ Type ".menu" to explore our services.
           message: "Pairing code generated successfully. Enter this code on your WhatsApp Linked Devices.",
         };
       }
-      if (this.sock) {
+
+      // Try direct call once socket is ready if event hasn't already fired
+      if (this.sock && this.isQrReady && !attemptedDirect && !this.state.pairingCode) {
+        attemptedDirect = true;
         try {
-          this.addLog("INFO", `Requesting Baileys pairing code for +${cleanPhone}...`);
           const rawCode = await this.sock.requestPairingCode(cleanPhone);
           if (rawCode) {
             const formattedCode = rawCode.match(/.{1,4}/g)?.join("-") || rawCode;
@@ -777,37 +831,12 @@ Type ".menu" to explore our services.
             };
           }
         } catch (err: any) {
-          const msg = err?.message || String(err);
-          this.addLog("INFO", `Waiting for WhatsApp socket readiness (+${cleanPhone}): ${msg}`);
-          await new Promise((r) => setTimeout(r, 700));
+          this.addLog("INFO", `Retrying socket readiness for +${cleanPhone}: ${err?.message || err}`);
         }
-      } else {
-        await new Promise((r) => setTimeout(r, 500));
       }
-    }
 
-    // Continue background attempt in case network latency was higher
-    (async () => {
-      const bgStart = Date.now();
-      while (Date.now() - bgStart < 30000 && !this.state.pairingCode && !this.isExplicitlyStopped) {
-        if (this.sock) {
-          try {
-            const rawCode = await this.sock.requestPairingCode(cleanPhone);
-            if (rawCode) {
-              const formattedCode = rawCode.match(/.{1,4}/g)?.join("-") || rawCode;
-              this.state.pairingCode = formattedCode;
-              this.state.connectionStatus = "pairing_code_ready";
-              this.addLog("INFO", `✅ WhatsApp Pairing Code generated for +${cleanPhone}: ${formattedCode}`);
-              break;
-            }
-          } catch {
-            await new Promise((r) => setTimeout(r, 1000));
-          }
-        } else {
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      }
-    })().catch(() => {});
+      await new Promise((r) => setTimeout(r, 400));
+    }
 
     if (this.state.pairingCode) {
       return {
@@ -820,12 +849,12 @@ Type ".menu" to explore our services.
     return {
       success: true,
       pending: true,
-      message: "Pairing session initiated. Connecting to WhatsApp multi-device gateway...",
+      message: "Pairing session initiated. Connecting to WhatsApp gateway...",
     };
   }
 
   async generateQrCode(forceNew = false) {
-    if (!forceNew && this.sock && this.state.qrCodeDataUrl && this.state.connectionStatus === "qr_ready") {
+    if (!forceNew && this.state.qrCodeDataUrl && (this.state.connectionStatus === "qr_ready" || this.isQrReady)) {
       return { success: true, qr: this.state.qrCodeDataUrl, message: "QR code ready." };
     }
     this.addLog("INFO", "Initiating fresh WhatsApp QR Code pairing...");
@@ -849,11 +878,11 @@ Type ".menu" to explore our services.
       return { success: false, message: startRes.message };
     }
     const start = Date.now();
-    while (Date.now() - start < 22000) {
+    while (Date.now() - start < 15000) {
       if (this.state.qrCodeDataUrl) {
         return { success: true, qr: this.state.qrCodeDataUrl, message: "QR code generated successfully." };
       }
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 300));
     }
     if (this.state.qrCodeDataUrl) {
       return { success: true, qr: this.state.qrCodeDataUrl, message: "QR code ready." };
@@ -3606,6 +3635,7 @@ _POWERED BY YASHI HALLS & CINERU.LK_
         }
       ],
       urls: [
+        { displayText: "🌐 OPEN NEON WEB MENU", url: "/menu" },
         { displayText: "📢 OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
       ],
       copyCodes: [

@@ -1020,6 +1020,13 @@ async function startServer() {
       res.json({ success: true, voiceAutoReplyEnabled: updated.voiceAutoReplyEnabled });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err?.message || 'Failed to toggle voice auto reply' });
+  // --- INTERACTIVE NEON WEB MENU UI ---
+  app.get(['/menu', '/menu.html'], (req: Request, res: Response) => {
+    const menuFilePath = path.resolve(rootDir, 'public', 'menu.html');
+    if (fs.existsSync(menuFilePath)) {
+      res.sendFile(menuFilePath);
+    } else {
+      res.status(404).send('Menu UI not found');
     }
   });
 
