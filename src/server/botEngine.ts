@@ -423,7 +423,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
 
       this.sock.ev.on("creds.update", async (creds: any) => {
         await saveCreds();
-        adminStore.saveSessionBackup(this.userId, this.sessionDir);
+        adminStore.saveSessionBackup(this.userId, this.sessionDir, false);
       });
 
       this.sock.ev.on("connection.update", async (update: any) => {
@@ -516,6 +516,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
           this.state.pairingCode = null;
           this.startTime = Date.now();
           this.state.startedAt = new Date().toISOString();
+          adminStore.saveSessionBackup(this.userId, this.sessionDir, true);
           const userJid = this.sock?.user?.id || "";
           const phoneNum = userJid.split(":")[0] || userJid.split("@")[0] || "Unknown";
           this.state.pairedNumber = phoneNum;

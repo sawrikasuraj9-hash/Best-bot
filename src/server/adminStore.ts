@@ -178,7 +178,25 @@ class AdminStore {
     return DEFAULT_DB;
   }
 
+  private saveTimeout: any = null;
+
   saveDatabase(data: any) {
+    try {
+      this.ensureDataDir();
+      if (this.saveTimeout) clearTimeout(this.saveTimeout);
+      this.saveTimeout = setTimeout(() => {
+        try {
+          fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+        } catch (err) {
+          console.error("Failed to save admin system db:", err);
+        }
+      }, 250);
+    } catch (err) {
+      console.error("Failed to save admin system db:", err);
+    }
+  }
+
+  saveDatabaseImmediate(data: any) {
     try {
       this.ensureDataDir();
       fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
@@ -500,28 +518,45 @@ class AdminStore {
     }
   }
 
-  saveSessionBackup(userId: string, sessionDir: string) {
+  private lastBackupTimes: Map<string, number> = new Map();
+
+  saveSessionBackup(userId: string, sessionDir: string, force = false) {
     try {
+      const safeKey = (userId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const now = Date.now();
+      const last = this.lastBackupTimes.get(safeKey) || 0;
+
+      if (!force && now - last < 60000) {
+        return;
+      }
+      this.lastBackupTimes.set(safeKey, now);
+
       if (!fs.existsSync(sessionDir)) return;
-      const files = fs.readdirSync(sessionDir);
-      const backup: Record<string, string> = {};
-      for (const file of files) {
-        if (file.endsWith(".json")) {
-          const filePath = path.join(sessionDir, file);
-          const content = fs.readFileSync(filePath, "utf-8");
-          if (content && content.length > 0) {
-            backup[file] = content;
+
+      setImmediate(async () => {
+        try {
+          const files = await fs.promises.readdir(sessionDir);
+          const backup: Record<string, string> = {};
+          for (const file of files) {
+            if (file.endsWith(".json")) {
+              const filePath = path.join(sessionDir, file);
+              const content = await fs.promises.readFile(filePath, "utf-8");
+              if (content && content.length > 0) {
+                backup[file] = content;
+              }
+            }
           }
+          if (Object.keys(backup).length > 0) {
+            if (!this.db.sessionBackups) this.db.sessionBackups = {};
+            this.db.sessionBackups[safeKey] = backup;
+            this.saveDatabase(this.db);
+          }
+        } catch (err: any) {
+          console.warn("[AdminStore] Async session backup note:", err?.message);
         }
-      }
-      if (Object.keys(backup).length > 0) {
-        if (!this.db.sessionBackups) this.db.sessionBackups = {};
-        const safeKey = (userId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
-        this.db.sessionBackups[safeKey] = backup;
-        this.saveDatabase(this.db);
-      }
+      });
     } catch (err: any) {
-      console.warn("[AdminStore] Session backup save failed:", err?.message);
+      console.warn("[AdminStore] Session backup save skipped:", err?.message);
     }
   }
 
