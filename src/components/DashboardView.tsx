@@ -31,6 +31,7 @@ import { useApp } from '../context/AppContext';
 import { APP_CONFIG } from '../data/initialData';
 import { soundFX } from '../utils/sound';
 import { CyberBotHologram } from './CyberBotHologram';
+import { WhatsAppMenuInteractivePreview } from './WhatsAppMenuInteractivePreview';
 
 export const DashboardView: React.FC = () => {
   const { 
@@ -657,6 +658,9 @@ export const DashboardView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* 7.5. INTERACTIVE MENU & 2-COLUMN BUTTONS SHOWCASE */}
+      <WhatsAppMenuInteractivePreview />
 
       {/* 8. ACTIVE BOT CONTROLS & ENGINE SETTINGS */}
       <div className="p-4 sm:p-5 rounded-2xl bg-[#060C18] border border-[#101E34] space-y-3">

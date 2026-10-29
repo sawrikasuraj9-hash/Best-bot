@@ -351,14 +351,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       wasOnlineRef.current = false;
       return;
     }
-    refreshBotStatus();
-    fetchLogs();
-    const interval = setInterval(() => {
-      refreshBotStatus();
-      fetchLogs();
-    }, 2500);
-    return () => clearInterval(interval);
+    let isCancelled = false;
+    let inFlight = false;
+
+    const runFastPulse = async () => {
+      if (inFlight || isCancelled) return;
+      inFlight = true;
+      try {
+        fetch('/api/keepalive', { method: 'GET', keepalive: true }).catch(() => {});
+        await refreshBotStatus();
+        await fetchLogs();
+      } catch {} finally {
+        inFlight = false;
+      }
+    };
+
+    runFastPulse();
+    // Second-by-second high speed status & keep-alive pulse (1200ms)
+    const interval = setInterval(runFastPulse, 1200);
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
   }, [isAuthenticated, refreshBotStatus, fetchLogs]);
+
+  // Global lightweight background keepalive ping (runs on any page of website)
+  useEffect(() => {
+    const kaInterval = setInterval(() => {
+      fetch('/api/keepalive', { method: 'GET', keepalive: true }).catch(() => {});
+    }, 2500);
+    return () => clearInterval(kaInterval);
+  }, []);
 
   // Real Firebase Auth State Listener
   useEffect(() => {
@@ -716,8 +739,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Active polling fallback in case connection takes a few seconds
       addToast('Connecting to WhatsApp gateway, generating pairing code...', 'info');
       let foundCode = false;
-      for (let i = 0; i < 12; i++) {
-        await new Promise((r) => setTimeout(r, 1200));
+      for (let i = 0; i < 18; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
         try {
           const statusRes = await fetch('/api/bot/status', {
             headers: getBotHeaders(),
@@ -746,7 +769,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!foundCode) {
         setPairingSession(null);
-        addToast('Pairing code generation timed out. Please tap Generate Pairing Code again.', 'error');
+        addToast('කෝඩ් එක ලබාගැනීමට නොහැකි විය. කරුණාකර නැවත "Generate Pairing Code" ඔබන්න.', 'error');
         return { success: false, message: 'Timed out' };
       }
       return { success: true, message: 'Done' };

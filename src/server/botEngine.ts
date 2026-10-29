@@ -1,6 +1,8 @@
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});import makeWASocket,{DisconnectReason,useMultiFileAuthState,fetchLatestBaileysVersion,Browsers,makeCacheableSignalKeyStore,downloadMediaMessage}from"@whiskeysockets/baileys";import pino from"pino";import QRCode from"qrcode";import fs from"fs";import path from"path";import{askGemini,analyzeAudioWithGemini,analyzeVideoWithGemini,generateCVWithGemini,chatAsYashiHallsAI,ChatMemoryItem}from"./geminiService";import{resolveSongAudio,searchYoutubeVideo}from"./audioService";import{resolveSearchImage}from"./imageService";import{adminStore}from"./adminStore";import{getWhatsAppVoiceBuffer}from"./voiceService";import{normalizeWhatsAppNumber}from"../utils/phone";import{resolveMediaFire}from"./mediafireService";import{resolveVideo}from"./videoService";import{searchMovies,formatMovieCard,searchFilmSets,formatFilmSetCard}from"./movieService";const BRAND_LOGO_URL="https://i.ibb.co/gM1MwL9T/IMG-20261024-WA0008.jpg";const WHATSAPP_CHANNEL_URL="https://whatsapp.com/channel/0029Vb927N4GJP8MS1yurM2Z";const OWNER_HOTLINE="0740712934";class BotEngine {
+import { sendButtons } from "./zqBaileysHelper";
+import { generateMenuCardImage } from "./menuCardGenerator";
+var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});import makeWASocket,{DisconnectReason,useMultiFileAuthState,fetchLatestBaileysVersion,Browsers,makeCacheableSignalKeyStore,downloadMediaMessage,proto,generateWAMessageFromContent}from"@whiskeysockets/baileys";import pino from"pino";import QRCode from"qrcode";import fs from"fs";import path from"path";import{askGemini,analyzeAudioWithGemini,analyzeVideoWithGemini,generateCVWithGemini,chatAsYashiHallsAI,ChatMemoryItem}from"./geminiService";import{resolveSongAudio,searchYoutubeVideo}from"./audioService";import{resolveSearchImage}from"./imageService";import{adminStore}from"./adminStore";import{getWhatsAppVoiceBuffer}from"./voiceService";import{normalizeWhatsAppNumber}from"../utils/phone";import{resolveMediaFire}from"./mediafireService";import{resolveVideo}from"./videoService";import{searchMovies,formatMovieCard,searchFilmSets,formatFilmSetCard}from"./movieService";const BRAND_LOGO_URL="https://i.ibb.co/gM1MwL9T/IMG-20261024-WA0008.jpg";const WHATSAPP_CHANNEL_URL="https://whatsapp.com/channel/0029Vb927N4GJP8MS1yurM2Z";const OWNER_HOTLINE="0740712934";class BotEngine {
   sock: any;
   logs: any[];
   maxLogs: number;
@@ -25,12 +27,13 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
   smartReplyCooldownMap: Map<string, any>;
   cachedLogoBuffer: Buffer | null;
   lastCachedLogoUrl: string;
+  lastWelcomeSentTime: number;
   state: any;
   userId: string;
   sessionDir: string;
   configFile: string;
 
-  constructor(userId="default"){this.sock=null;this.logs=[];this.maxLogs=500;this.startTime=null;this.reconnectAttempts=0;this.maxReconnectAttempts=20;this.isExplicitlyStopped=true;this.reconnectTimer=null;this.activePairingPhone=null;this.groupWarnings=new Map;this.activeQuizSessions=new Map;this.processedCalls=new Set;this.processedMessageIds=new Set;this.commandCooldowns=new Map;this.rawQrString=null;this.requestedFromJid=null;this.isQrReady=false;this.voiceCooldownMap=new Map;this.chatMemory=new Map;this.start247Watchdog();this.chatAiCooldownMap=new Map;this.smartReplyCooldownMap=new Map;
+  constructor(userId="default"){this.sock=null;this.logs=[];this.maxLogs=500;this.startTime=null;this.reconnectAttempts=0;this.maxReconnectAttempts=20;this.isExplicitlyStopped=true;this.reconnectTimer=null;this.activePairingPhone=null;this.groupWarnings=new Map;this.activeQuizSessions=new Map;this.processedCalls=new Set;this.processedMessageIds=new Set;this.commandCooldowns=new Map;this.rawQrString=null;this.requestedFromJid=null;this.isQrReady=false;this.voiceCooldownMap=new Map;this.chatMemory=new Map;this.start247Watchdog();this.chatAiCooldownMap=new Map;this.smartReplyCooldownMap=new Map;this.lastWelcomeSentTime=0;
     this.cachedLogoBuffer = null;
     this.lastCachedLogoUrl = '';
     const initialCandidates = [
@@ -343,7 +346,7 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
           if (this.processedCalls.size > 200) this.processedCalls.clear();
         }
       } catch (err) {}
-    }, 5000);
+    }, 25000);
   }
 
   async start(requestedPhone?: string | null) {
@@ -429,16 +432,14 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
       this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
-          if (!this.activePairingPhone || this.state.connectionStatus === "qr_ready") {
-            this.isQrReady = true;
-            this.state.connectionStatus = "qr_ready";
-            try {
-              const dataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 7 });
-              this.state.qrCodeDataUrl = dataUrl;
-              this.addLog("INFO", "QR code generated and ready for WhatsApp scan.");
-            } catch (err) {
-              this.addLog("ERROR", "Failed to generate QR Code data URL.");
-            }
+          this.isQrReady = true;
+          this.state.connectionStatus = "qr_ready";
+          try {
+            const dataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 7 });
+            this.state.qrCodeDataUrl = dataUrl;
+            this.addLog("INFO", "QR code generated and ready for WhatsApp scan.");
+          } catch (err) {
+            this.addLog("ERROR", "Failed to generate QR Code data URL.");
           }
         }
 
@@ -526,54 +527,68 @@ var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,
           try {
             const targetJid = userJid.includes(":") ? `${userJid.split(":")[0]}@s.whatsapp.net` : userJid.includes("@") ? userJid : `${userJid}@s.whatsapp.net`;
             if (targetJid && this.sock) {
-              // Keep user's personal WhatsApp profile picture (DP) and display name untouched.
-              // Do NOT overwrite user's DP or name when they connect.
+              const welcomeLockPath = path.join(this.sessionDir, "welcome_sent.lock");
+              const isFirstTimeConnect = !fs.existsSync(welcomeLockPath);
 
-              const connectLogoUrl = "https://i.ibb.co/zWdhvSk2/file-0000000010a08208abefddf3ed14ed28.png";
-              const p = this.state.config.prefix || ".";
-              const welcomeCaption = `*〘 👑 ＭＩＮＩ ＢＯＴ ＳＹＳＴＥＭ 👑 〙*
+              if (isFirstTimeConnect) {
+                try {
+                  fs.writeFileSync(welcomeLockPath, new Date().toISOString(), "utf-8");
+                } catch {}
+                const p = this.state.config.prefix || ".";
+                const connectedOwner = this.getConnectedUserName();
+                const welcomeCaption = `╭───〔 YASHI-MINI 〕───➤
+│ 🤖 Bot Name : ${this.state.config.botName || 'YASHI HALLS MINI'}
+│ 👑 Owner    : ${connectedOwner}
+│ 🟢 Status   : CONNECTED
+│ 🔣 Prefix   : ${p}
+╰────────────────────➤
 
-  🟢 *ＳＴＡＴＵＳ : ＣＯＮＮＥＣＴＥＤ*
+💬 *BOT STATUS: CONNECTED*
+Welcome to ${this.state.config.botName || 'YASHI HALLS MINI'}! Your WhatsApp Automation Bot is now online and active 24/7.
 
-  ✦ *User:* Active ✅
-  ✦ *Prefix:* [ ${p} ]
-  ✦ *Commands:* ${p}menu
-  ✦ *Check Bot:* ${p}alive
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
 
-💬 _Welcome to Yashi Halls WhatsApp Assistant! Type *${p}menu* to start._
+                const welcomeButtons = [
+                  { buttonId: "welcome_ping", buttonText: { displayText: "🏓 PING" } },
+                  { buttonId: "welcome_alive", buttonText: { displayText: "💚 ALIVE" } },
+                  { buttonId: "welcome_menu", buttonText: { displayText: "📂 MENU" } },
+                ];
 
-> ⚡*ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
-
-              try {
-                await this.sock.sendMessage(targetJid, {
-                  image: { url: connectLogoUrl },
-                  caption: welcomeCaption,
+                await this.sendInteractiveButtonsOrFallback(targetJid, null, {
+                  text: welcomeCaption,
+                  title: "👑 YASHI HALLS MINI CONNECTED 👑",
+                  includeLogo: true,
+                  buttons: welcomeButtons,
+                  urls: [
+                    { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+                  ]
                 });
-              } catch {
-                await this.sock.sendMessage(targetJid, { text: welcomeCaption });
-              }
-              this.addLog("INFO", `📤 Sent connected welcome message to paired owner at ${targetJid}`);
-              try {
-                const voicePath = path.resolve(process.cwd(), "data", "connect_welcome_voice.mp3");
-                if (fs.existsSync(voicePath)) {
-                  const voiceBuf = fs.readFileSync(voicePath);
-                  try {
-                    await this.sock.sendMessage(targetJid, {
-                      audio: voiceBuf,
-                      mimetype: "audio/ogg; codecs=opus",
-                      ptt: true,
-                    });
-                  } catch {
-                    await this.sock.sendMessage(targetJid, {
-                      audio: voiceBuf,
-                      mimetype: "audio/mp4",
-                      ptt: true,
-                    });
+                this.addLog("INFO", `📤 Sent initial connection welcome message with buttons to owner (${connectedOwner}) at ${targetJid}`);
+
+                try {
+                  const voicePath = path.resolve(process.cwd(), "data", "connect_welcome_voice.mp3");
+                  if (fs.existsSync(voicePath)) {
+                    const voiceBuf = fs.readFileSync(voicePath);
+                    try {
+                      await this.sock.sendMessage(targetJid, {
+                        audio: voiceBuf,
+                        mimetype: "audio/ogg; codecs=opus",
+                        ptt: true,
+                      });
+                    } catch {
+                      await this.sock.sendMessage(targetJid, {
+                        audio: voiceBuf,
+                        mimetype: "audio/mp4",
+                        ptt: true,
+                      });
+                    }
+                    this.addLog("INFO", `🎙️ Sent initial welcome voice note to owner at ${targetJid}`);
                   }
-                  this.addLog("INFO", `🎙️ Sent welcome voice note to owner at ${targetJid}`);
+                } catch (vErr: any) {
+                  this.addLog("WARN", `Could not send welcome voice note to owner: ${vErr?.message || vErr}`);
                 }
-              } catch (vErr: any) {
-                this.addLog("WARN", `Could not send welcome voice note to owner: ${vErr?.message || vErr}`);
+              } else {
+                this.addLog("INFO", `[Connection Guard] Reconnection established for +${phoneNum}. Welcome message was already delivered upon initial pairing. Skipping duplicate message.`);
               }
 
               if (this.requestedFromJid && this.requestedFromJid !== targetJid) {
@@ -723,6 +738,7 @@ Type ".menu" to explore our services.
       this.reconnectTimer = null;
     }
     await this.stop(false);
+    adminStore.deleteSessionBackup(this.userId);
     this.clearSessionFiles();
     this.state.pairedNumber = null;
     this.state.qrCodeDataUrl = null;
@@ -734,9 +750,10 @@ Type ".menu" to explore our services.
       return { success: false, message: res.message };
     }
 
-    await new Promise((r) => setTimeout(r, 1500));
+    // Await socket handshake and request pairing code up to 18 seconds
+    await new Promise((r) => setTimeout(r, 1200));
     const startTime = Date.now();
-    while (Date.now() - startTime < 6000) {
+    while (Date.now() - startTime < 18000) {
       if (this.state.pairingCode) {
         return {
           success: true,
@@ -744,7 +761,7 @@ Type ".menu" to explore our services.
           message: "Pairing code generated successfully. Enter this code on your WhatsApp Linked Devices.",
         };
       }
-      if (this.sock && !this.sock.authState?.creds?.registered) {
+      if (this.sock) {
         try {
           this.addLog("INFO", `Requesting Baileys pairing code for +${cleanPhone}...`);
           const rawCode = await this.sock.requestPairingCode(cleanPhone);
@@ -761,20 +778,19 @@ Type ".menu" to explore our services.
           }
         } catch (err: any) {
           const msg = err?.message || String(err);
-          this.addLog("WARN", `Pairing code attempt: ${msg}`);
-          if (msg.includes("registered")) break;
-          await new Promise((r) => setTimeout(r, 600));
+          this.addLog("INFO", `Waiting for WhatsApp socket readiness (+${cleanPhone}): ${msg}`);
+          await new Promise((r) => setTimeout(r, 700));
         }
       } else {
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
 
-    // Continue background attempt if WebSocket handshake is finishing
+    // Continue background attempt in case network latency was higher
     (async () => {
       const bgStart = Date.now();
-      while (Date.now() - bgStart < 25000 && !this.state.pairingCode && !this.isExplicitlyStopped) {
-        if (this.sock && !this.sock.authState?.creds?.registered) {
+      while (Date.now() - bgStart < 30000 && !this.state.pairingCode && !this.isExplicitlyStopped) {
+        if (this.sock) {
           try {
             const rawCode = await this.sock.requestPairingCode(cleanPhone);
             if (rawCode) {
@@ -792,6 +808,14 @@ Type ".menu" to explore our services.
         }
       }
     })().catch(() => {});
+
+    if (this.state.pairingCode) {
+      return {
+        success: true,
+        code: this.state.pairingCode,
+        message: "Pairing code generated successfully.",
+      };
+    }
 
     return {
       success: true,
@@ -813,6 +837,7 @@ Type ".menu" to explore our services.
       this.reconnectTimer = null;
     }
     await this.stop(false);
+    adminStore.deleteSessionBackup(this.userId);
     this.clearSessionFiles();
     this.state.pairedNumber = null;
     this.state.pairingCode = null;
@@ -824,7 +849,7 @@ Type ".menu" to explore our services.
       return { success: false, message: startRes.message };
     }
     const start = Date.now();
-    while (Date.now() - start < 15000) {
+    while (Date.now() - start < 22000) {
       if (this.state.qrCodeDataUrl) {
         return { success: true, qr: this.state.qrCodeDataUrl, message: "QR code generated successfully." };
       }
@@ -833,7 +858,7 @@ Type ".menu" to explore our services.
     if (this.state.qrCodeDataUrl) {
       return { success: true, qr: this.state.qrCodeDataUrl, message: "QR code ready." };
     }
-    return { success: false, message: "QR Code generation timed out. Please try again." };
+    return { success: false, message: "QR Code generation timed out. Please tap Refresh QR Code." };
   }
 
   async requestPairingCodeAndQr(phone: string): Promise<{
@@ -939,7 +964,108 @@ Type ".menu" to explore our services.
       success: false,
       message: "Pairing session timed out. Please try again in a few seconds.",
     };
-  }async stop(isUserExplicitStop=true){this.isExplicitlyStopped=isUserExplicitStop;this.reconnectAttempts=isUserExplicitStop?this.maxReconnectAttempts:0;if(this.reconnectTimer){clearTimeout(this.reconnectTimer);this.reconnectTimer=null}this.isQrReady=false;this.startTime=null;this.state.isOnline=false;this.state.connectionStatus="disconnected";if(isUserExplicitStop){this.state.qrCodeDataUrl=null;this.state.pairingCode=null}if(this.sock){try{this.sock.ev.removeAllListeners("connection.update");this.sock.ev.removeAllListeners("creds.update");this.sock.ev.removeAllListeners("messages.upsert");this.sock.ev.removeAllListeners("call");this.sock.ev.removeAllListeners("group-participants.update");try{this.sock.ws?.close()}catch(e){}try{this.sock.end(void 0)}catch(e){}}catch(err){}this.sock=null}if(isUserExplicitStop){this.addLog("INFO","\u{1F6D1} Bot engine manually stopped by user.")}return{success:true,message:"Bot stopped successfully."}}async restart(){this.addLog("INFO",`Restarting ${this.state.config.botName} bot engine...`);await this.stop();await new Promise(r=>setTimeout(r,1200));return this.start()}async clearSession(){await this.stop();this.clearSessionFiles();this.state.pairedNumber=null;this.state.qrCodeDataUrl=null;this.state.pairingCode=null;this.state.isOnline=false;this.state.connectionStatus="disconnected";this.addLog("INFO","\u{1F9F9} Session data and credentials wiped. Ready for fresh pairing.");return{success:true,message:"Session data cleared successfully."}}clearSessionFiles(){try{if(fs.existsSync(this.sessionDir)){fs.rmSync(this.sessionDir,{recursive:true,force:true})}fs.mkdirSync(this.sessionDir,{recursive:true})}catch(e){this.addLog("WARN",`Error clearing session files: ${e?.message}`)}}extractMessageContent(msg){if(!msg.message)return"";let messageObj=msg.message;let depth=0;while(depth<5&&messageObj&&(messageObj.viewOnceMessage?.message||messageObj.viewOnceMessageV2?.message||messageObj.viewOnceMessageV2Extension?.message||messageObj.ephemeralMessage?.message||messageObj.documentWithCaptionMessage?.message)){messageObj=messageObj.viewOnceMessage?.message||messageObj.viewOnceMessageV2?.message||messageObj.viewOnceMessageV2Extension?.message||messageObj.ephemeralMessage?.message||messageObj.documentWithCaptionMessage?.message;depth++}if(!messageObj)return"";if(messageObj.conversation)return messageObj.conversation;if(messageObj.extendedTextMessage?.text)return messageObj.extendedTextMessage.text;if(messageObj.imageMessage?.caption)return messageObj.imageMessage.caption;if(messageObj.videoMessage?.caption)return messageObj.videoMessage.caption;if(messageObj.buttonsResponseMessage?.selectedButtonId){return messageObj.buttonsResponseMessage.selectedButtonId}if(messageObj.buttonsResponseMessage?.selectedDisplayText){return messageObj.buttonsResponseMessage.selectedDisplayText}if(messageObj.templateButtonReplyMessage?.selectedId){return messageObj.templateButtonReplyMessage.selectedId}if(messageObj.templateButtonReplyMessage?.selectedDisplayText){return messageObj.templateButtonReplyMessage.selectedDisplayText}if(messageObj.listResponseMessage?.singleSelectReply?.selectedRowId){return messageObj.listResponseMessage.singleSelectReply.selectedRowId}if(messageObj.listResponseMessage?.title){return messageObj.listResponseMessage.title}if(messageObj.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson){try{const parsed=JSON.parse(messageObj.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);const resolved=parsed?.id||parsed?.selected_id||parsed?.selected_row_id||parsed?.selectedRowId||parsed?.title||parsed?.display_text||"";if(resolved)return resolved}catch{}}if(messageObj.interactiveResponseMessage?.body?.text){return messageObj.interactiveResponseMessage.body.text}return""}mapButtonToCommand(btnId,prefix){switch(btnId){case"btn_cat_song":case"btn_song":return`${prefix}menu song`;case"btn_cat_video":case"btn_video":return`${prefix}menu video`;case"btn_cat_image":case"btn_img":case"btn_image":return`${prefix}menu image`;case"btn_cat_ai":case"btn_ai":return`${prefix}menu ai`;case"btn_cat_games":case"btn_games":return`${prefix}menu games`;case"btn_cat_group":case"btn_group":return`${prefix}menu group`;case"btn_cat_settings":case"btn_settings":return`${prefix}settings`;case"btn_ping":return`${prefix}ping`;case"btn_quiz":return`${prefix}quiz`;case"btn_roll":return`${prefix}roll`;case"btn_flip":return`${prefix}flip`;case"btn_groupinfo":return`${prefix}groupinfo`;case"btn_admins":return`${prefix}admins`;case"btn_tagall":return`${prefix}tagall`;case"btn_owner":return`${prefix}owner`;case"btn_main_menu":return`${prefix}menu`;case"btn_upgrade":return`${prefix}upgrade`;default:return btnId.startsWith(prefix)?btnId:`${prefix}${btnId}`}}async handleIncomingMessage(msg) {
+  }async stop(isUserExplicitStop=true){this.isExplicitlyStopped=isUserExplicitStop;this.reconnectAttempts=isUserExplicitStop?this.maxReconnectAttempts:0;if(this.reconnectTimer){clearTimeout(this.reconnectTimer);this.reconnectTimer=null}this.isQrReady=false;this.startTime=null;this.state.isOnline=false;this.state.connectionStatus="disconnected";if(isUserExplicitStop){this.state.qrCodeDataUrl=null;this.state.pairingCode=null}if(this.sock){try{this.sock.ev.removeAllListeners("connection.update");this.sock.ev.removeAllListeners("creds.update");this.sock.ev.removeAllListeners("messages.upsert");this.sock.ev.removeAllListeners("call");this.sock.ev.removeAllListeners("group-participants.update");try{this.sock.ws?.close()}catch(e){}try{this.sock.end(void 0)}catch(e){}}catch(err){}this.sock=null}if(isUserExplicitStop){this.addLog("INFO","\u{1F6D1} Bot engine manually stopped by user.")}return{success:true,message:"Bot stopped successfully."}}async restart(){this.addLog("INFO",`Restarting ${this.state.config.botName} bot engine...`);await this.stop();await new Promise(r=>setTimeout(r,1200));return this.start()}async clearSession(){await this.stop();adminStore.deleteSessionBackup(this.userId);this.clearSessionFiles();this.state.pairedNumber=null;this.state.qrCodeDataUrl=null;this.state.pairingCode=null;this.state.isOnline=false;this.state.connectionStatus="disconnected";this.addLog("INFO","\u{1F9F9} Session data and credentials wiped. Ready for fresh pairing.");return{success:true,message:"Session data cleared successfully."}}clearSessionFiles(){try{if(fs.existsSync(this.sessionDir)){fs.rmSync(this.sessionDir,{recursive:true,force:true})}fs.mkdirSync(this.sessionDir,{recursive:true})}catch(e){this.addLog("WARN",`Error clearing session files: ${e?.message}`)}}extractMessageContent(msg){if(!msg.message)return"";let messageObj=msg.message;let depth=0;while(depth<5&&messageObj&&(messageObj.viewOnceMessage?.message||messageObj.viewOnceMessageV2?.message||messageObj.viewOnceMessageV2Extension?.message||messageObj.ephemeralMessage?.message||messageObj.documentWithCaptionMessage?.message)){messageObj=messageObj.viewOnceMessage?.message||messageObj.viewOnceMessageV2?.message||messageObj.viewOnceMessageV2Extension?.message||messageObj.ephemeralMessage?.message||messageObj.documentWithCaptionMessage?.message;depth++}if(!messageObj)return"";if(messageObj.conversation)return messageObj.conversation;if(messageObj.extendedTextMessage?.text)return messageObj.extendedTextMessage.text;if(messageObj.imageMessage?.caption)return messageObj.imageMessage.caption;if(messageObj.videoMessage?.caption)return messageObj.videoMessage.caption;if(messageObj.buttonsResponseMessage?.selectedButtonId){return messageObj.buttonsResponseMessage.selectedButtonId}if(messageObj.buttonsResponseMessage?.selectedDisplayText){return messageObj.buttonsResponseMessage.selectedDisplayText}if(messageObj.templateButtonReplyMessage?.selectedId){return messageObj.templateButtonReplyMessage.selectedId}if(messageObj.templateButtonReplyMessage?.selectedDisplayText){return messageObj.templateButtonReplyMessage.selectedDisplayText}if(messageObj.listResponseMessage?.singleSelectReply?.selectedRowId){return messageObj.listResponseMessage.singleSelectReply.selectedRowId}if(messageObj.listResponseMessage?.title){return messageObj.listResponseMessage.title}if(messageObj.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson){try{const parsed=JSON.parse(messageObj.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);const resolved=parsed?.id||parsed?.selected_id||parsed?.selected_row_id||parsed?.selectedRowId||parsed?.title||parsed?.display_text||"";if(resolved)return resolved}catch{}}if(messageObj.interactiveResponseMessage?.body?.text){return messageObj.interactiveResponseMessage.body.text}return""}mapButtonToCommand(btnId, prefix) {
+  const clean = (btnId || '').trim();
+  switch (clean) {
+    case "welcome_ping":
+    case "btn_ping":
+      return `${prefix}ping`;
+    case "welcome_alive":
+    case "btn_alive":
+      return `${prefix}alive`;
+    case "welcome_menu":
+    case "welcome_main":
+    case "btn_main_menu":
+    case "menu_main":
+      return `${prefix}menu`;
+    case "menu_profile":
+    case "menu_cat_1":
+    case "cat_profile":
+    case "cat_1":
+      return `${prefix}menu 1`;
+    case "menu_download":
+    case "menu_cat_2":
+    case "cat_download":
+    case "cat_2":
+      return `${prefix}menu 2`;
+    case "menu_movies":
+    case "menu_movie":
+    case "menu_cat_3":
+    case "cat_movies":
+    case "cat_3":
+      return `${prefix}menu 3`;
+    case "menu_ai":
+    case "menu_cat_4":
+    case "cat_ai":
+    case "cat_4":
+      return `${prefix}menu 4`;
+    case "menu_group":
+    case "menu_groups":
+    case "menu_cat_5":
+    case "cat_group":
+    case "cat_5":
+      return `${prefix}menu 5`;
+    case "menu_games":
+    case "menu_game":
+    case "menu_cat_6":
+    case "cat_games":
+    case "cat_6":
+      return `${prefix}menu 6`;
+    case "menu_settings":
+    case "menu_setting":
+    case "menu_cat_7":
+    case "cat_settings":
+    case "cat_7":
+      return `${prefix}menu 7`;
+    case "menu_daily":
+    case "menu_cat_8":
+    case "cat_daily":
+    case "cat_8":
+      return `${prefix}menu 8`;
+    case "btn_cat_song":
+    case "btn_song":
+      return `${prefix}song`;
+    case "btn_cat_video":
+    case "btn_video":
+      return `${prefix}video`;
+    case "btn_play":
+      return `${prefix}play`;
+    case "btn_audio":
+      return `${prefix}audio`;
+    case "btn_ytsearch":
+      return `${prefix}ytsearch`;
+    case "btn_mf":
+    case "btn_mediafire":
+      return `${prefix}mf`;
+    case "btn_tt":
+    case "btn_tiktok":
+      return `${prefix}tiktok`;
+    case "btn_fb":
+      return `${prefix}fb`;
+    case "btn_ig":
+      return `${prefix}ig`;
+    case "btn_twitter":
+      return `${prefix}twitter`;
+    case "btn_apk":
+      return `${prefix}apk`;
+    case "btn_lyrics":
+      return `${prefix}lyrics`;
+    case "btn_quiz":
+      return `${prefix}quiz`;
+    case "btn_roll":
+      return `${prefix}roll`;
+    case "btn_flip":
+      return `${prefix}flip`;
+    case "btn_slot":
+      return `${prefix}slot`;
+    case "btn_owner":
+      return `${prefix}owner`;
+    case "btn_upgrade":
+      return `${prefix}upgrade`;
+    default:
+      return clean.startsWith(prefix) ? clean : `${prefix}${clean}`;
+  }
+}async handleIncomingMessage(msg) {
     if (!this.sock || !msg.key) return;
 
     // 1. Deduplicate message by ID
@@ -1114,7 +1240,7 @@ Type ".menu" to explore our services.
 /* Text and prefix initialized at top */
 if(isGroup&&this.state.config.antiLink&&!msg.key.fromMe){const hasLink=/(https?:\/\/[^\s]+|chat\.whatsapp\.com\/[^\s]+|wa\.me\/[^\s]+|bit\.ly\/[^\s]+|t\.me\/[^\s]+)/gi.test(text);const isOwner2=sender.includes(this.state.config.ownerNumber.replace(/\D/g,""));if(hasLink&&!isOwner2){this.addLog("WARN",`[ANTI-LINK] Unauthorized link detected from ${sender.split("@")[0]} in ${jid}`);try{await this.sock.sendMessage(jid,{delete:msg.key})}catch{}try{await this.sock.sendMessage(jid,{text:`\u26A0\uFE0F *ANTI-LINK SYSTEM ACTIVATED!* \u{1F6AB}\n@${sender.split("@")[0]}, \u0D9C\u0DD8\u0DB4\u0DCA \u0D91\u0D9A\u0DA7 \u0DBD\u0DD2\u0DB1\u0DCA\u0D9A\u0DCA (links) \u0DAF\u0DD0\u0DB8\u0DD3\u0DB8 \u0DAD\u0DC4\u0DB1\u0DB8\u0DCA \u0D9A\u0DBB \u0D87\u0DAD!\n\n\u23F3 *3... 2... 1... Good byee! \u{1F44B}*`,mentions:[sender]})}catch{}try{await this.sock.groupParticipantsUpdate(jid,[sender],"remove");this.addLog("INFO",`[ANTI-LINK] Kicked user ${sender.split("@")[0]} from group ${jid}`)}catch(kErr:any){this.addLog("WARN",`[ANTI-LINK] Could not kick ${sender.split("@")[0]}: ${kErr?.message}. Ensure bot is group admin.`)}return}}if(this.activeQuizSessions.has(jid)&&!text.startsWith(prefix)){const quiz=this.activeQuizSessions.get(jid);if(text.toLowerCase()===quiz.answer.toLowerCase()){this.activeQuizSessions.delete(jid);await this.reply(jid,msg,`\u{1F389} *CORRECT ANSWER!* \u{1F3C6}
 Congratulations @${sender.split("@")[0]}! You solved the quiz.
-_Answer was:_ *${quiz.answer}*`);return}}if(text.startsWith("btn_")){text=this.mapButtonToCommand(text,prefix)}else if(!text.startsWith(prefix)){const lower=text.toLowerCase().trim();if(lower.includes("mediafire.com/file/")||lower.includes("mediafire.com/?")||lower.includes("mediafire.com/download")){text=`${prefix}mediafire ${text}`}else if(lower.startsWith("film ")||lower.startsWith("movie ")||lower.startsWith("filmdub ")||lower.startsWith("dub ")||lower.startsWith("cineru ")||lower.startsWith("cinerulk ")||lower.startsWith("sinhalasub ")||lower.startsWith("cinesubz ")||lower.startsWith("pair ")||lower.startsWith("paircode ")||lower.startsWith("qr ")||lower.startsWith("connect ")||lower.startsWith("song ")||lower.startsWith("video ")||lower.startsWith("mp3 ")){text=`${prefix}${text}`}else{const numMap={"0":`${prefix}menu`,".0":`${prefix}menu`,"1":`${prefix}menu download`,".1":`${prefix}menu download`,"2":`${prefix}menu movie`,".2":`${prefix}menu movie`,"3":`${prefix}menu ai`,".3":`${prefix}menu ai`,"4":`${prefix}menu group`,".4":`${prefix}menu group`,"5":`${prefix}menu games`,".5":`${prefix}menu games`,"6":`${prefix}menu info`,".6":`${prefix}menu info`,"7":`${prefix}menu daily`,".7":`${prefix}menu daily`,"8":`${prefix}menu business`,".8":`${prefix}menu business`,"1.1":`${prefix}mediafire`,"1.2":`${prefix}song`,"1.3":`${prefix}video`,"1.4":`${prefix}tiktok`,"1.5":`${prefix}fb`,"1.6":`${prefix}ig`,"1.7":`${prefix}twitter`,"1.8":`${prefix}apk`,"2.1":`${prefix}film`,"2.2":`${prefix}filmdub`,"2.3":`${prefix}movie`,"2.4":`${prefix}cinesubz`,"2.5":`${prefix}sinhalasub`,"3.1":`${prefix}ai`,"3.2":`${prefix}translate`,"3.3":`${prefix}summarize`,"3.4":`${prefix}write`,"3.5":`${prefix}code`,"3.6":`${prefix}imagine`,"3.7":`${prefix}voicetrans`,"3.8":`${prefix}aisticker`,"3.9":`${prefix}dubvideo`,"3.10":`${prefix}shazam`,"3.11":`${prefix}transcribe`,"3.12":`${prefix}math`,"3.13":`${prefix}food`,"3.14":`${prefix}cv`,"4.1":`${prefix}groupinfo`,"4.2":`${prefix}admins`,"4.3":`${prefix}tagall`,"4.4":`${prefix}kick`,"4.5":`${prefix}add`,"4.6":`${prefix}mute`,"4.7":`${prefix}antilink`,"5.1":`${prefix}quiz`,"5.2":`${prefix}roll`,"5.3":`${prefix}flip`,"5.4":`${prefix}guess`,"5.5":`${prefix}slot`,"5.6":`${prefix}leaderboard`,"6.1":`${prefix}ping`,"6.2":`${prefix}owner`,"6.3":`${prefix}settings`,"7.1":`${prefix}gold`,"7.2":`${prefix}bill`,"7.3":`${prefix}remind`,"8.1":`${prefix}shop`,"8.2":`${prefix}invoice`};if(numMap[lower]){text=numMap[lower]}else if(lower==="0"||lower===".0"||lower.includes("main menu")||lower==="back"||lower.includes("back to")||lower.includes("return")){text=`${prefix}menu`}else if(lower.includes("download")||lower.includes("downlod")||lower.includes("mediafire")){text=`${prefix}menu download`}else if(lower==="movie"||lower==="film"||lower==="movies"||lower==="films"||lower==="filmdub"||lower==="sinhalasub"||lower==="cineru"||lower==="cinesubz"||lower==="sub"||lower==="menu movie"){text=`${prefix}menu movie`}else if(lower==="ai"||lower.includes("ai chat")||lower.includes("halls ai")||lower.includes("voice")){text=`${prefix}menu ai`}else if(lower.includes("group")||lower.includes("admin")){text=`${prefix}menu group`}else if(lower.includes("game")||lower.includes("games")){text=`${prefix}menu games`}else if(lower.includes("setting")||lower.includes("info")||lower.includes("config")){text=`${prefix}menu info`}else if(["menu","help","ping","owner","settings","quiz","roll","flip","guess","film","filmdub","movie","mediafire","cineru","sinhalasub","pair","paircode","qr","connect"].includes(lower)){text=`${prefix}${lower}`}}}    if (this.state.config.voiceAutoReplyEnabled !== false && !text.startsWith(prefix)) {
+_Answer was:_ *${quiz.answer}*`);return}}if(text.startsWith("btn_") || text.startsWith("welcome_") || text.startsWith("menu_") || text.startsWith("cat_")){text=this.mapButtonToCommand(text,prefix)}else if(!text.startsWith(prefix)){const lower=text.toLowerCase().trim();if(lower.includes("mediafire.com/file/")||lower.includes("mediafire.com/?")||lower.includes("mediafire.com/download")){text=`${prefix}mediafire ${text}`}else if(lower.startsWith("film ")||lower.startsWith("movie ")||lower.startsWith("filmdub ")||lower.startsWith("dub ")||lower.startsWith("cineru ")||lower.startsWith("cinerulk ")||lower.startsWith("sinhalasub ")||lower.startsWith("cinesubz ")||lower.startsWith("pair ")||lower.startsWith("paircode ")||lower.startsWith("qr ")||lower.startsWith("connect ")||lower.startsWith("song ")||lower.startsWith("video ")||lower.startsWith("mp3 ")){text=`${prefix}${text}`}else{const numMap={"0":`${prefix}menu`,".0":`${prefix}menu`,"1":`${prefix}menu 1`,".1":`${prefix}menu 1`,"2":`${prefix}menu 2`,".2":`${prefix}menu 2`,"3":`${prefix}menu 3`,".3":`${prefix}menu 3`,"4":`${prefix}menu 4`,".4":`${prefix}menu 4`,"5":`${prefix}menu 5`,".5":`${prefix}menu 5`,"6":`${prefix}menu 6`,".6":`${prefix}menu 6`,"7":`${prefix}menu 7`,".7":`${prefix}menu 7`,"8":`${prefix}menu 8`,".8":`${prefix}menu 8`,"1.1":`${prefix}status`,"1.2":`${prefix}setstatus`,"1.3":`${prefix}setdp`,"1.4":`${prefix}getdp`,"2.1":`${prefix}song`,"2.2":`${prefix}video`,"2.3":`${prefix}play`,"2.4":`${prefix}audio`,"2.5":`${prefix}ytsearch`,"2.6":`${prefix}mf`,"2.7":`${prefix}tt`,"2.8":`${prefix}fb`,"2.9":`${prefix}ig`,"2.10":`${prefix}twitter`,"2.11":`${prefix}apk`,"2.12":`${prefix}lyrics`,"3.1":`${prefix}cineru`,"3.2":`${prefix}film`,"3.3":`${prefix}filmdub`,"3.4":`${prefix}cinesubz`,"3.5":`${prefix}sinhalasub`,"4.1":`${prefix}ai`,"4.2":`${prefix}translate`,"4.3":`${prefix}summarize`,"4.4":`${prefix}write`,"4.5":`${prefix}code`,"4.6":`${prefix}imagine`,"4.7":`${prefix}voicetrans`,"4.8":`${prefix}aisticker`,"4.9":`${prefix}sticker`,"5.1":`${prefix}groupinfo`,"5.2":`${prefix}admins`,"5.3":`${prefix}tagall`,"5.4":`${prefix}kick`,"5.5":`${prefix}add`,"5.6":`${prefix}mute`,"5.7":`${prefix}antilink`,"6.1":`${prefix}quiz`,"6.2":`${prefix}roll`,"6.3":`${prefix}flip`,"6.4":`${prefix}guess`,"6.5":`${prefix}slot`,"6.6":`${prefix}leaderboard`,"7.1":`${prefix}ping`,"7.2":`${prefix}alive`,"7.3":`${prefix}uptime`,"7.4":`${prefix}botinfo`,"7.5":`${prefix}settings`,"7.6":`${prefix}owner`,"8.1":`${prefix}gold`,"8.2":`${prefix}crypto`,"8.3":`${prefix}bill`,"8.4":`${prefix}remind`,"8.5":`${prefix}weather`};if(numMap[lower]){text=numMap[lower]}else if(lower==="0"||lower===".0"||lower.includes("main menu")||lower==="back"||lower.includes("back to")||lower.includes("return")){text=`${prefix}menu`}else if(lower.includes("download")||lower.includes("downlod")||lower.includes("mediafire")){text=`${prefix}menu 2`}else if(lower==="movie"||lower==="film"||lower==="movies"||lower==="films"||lower==="filmdub"||lower==="sinhalasub"||lower==="cineru"||lower==="cinesubz"||lower==="sub"||lower==="menu movie"){text=`${prefix}menu 3`}else if(lower==="ai"||lower.includes("ai chat")||lower.includes("halls ai")||lower.includes("voice")){text=`${prefix}menu 4`}else if(lower.includes("group")||lower.includes("admin")){text=`${prefix}menu 5`}else if(lower.includes("game")||lower.includes("games")){text=`${prefix}menu 6`}else if(lower.includes("setting")||lower.includes("info")||lower.includes("config")){text=`${prefix}menu 7`}else if(lower.includes("daily")||lower.includes("utility")||lower.includes("utilities")){text=`${prefix}menu 8`}else if(["menu","help","ping","alive","owner","settings","quiz","roll","flip","guess","film","filmdub","movie","mediafire","mf","cineru","sinhalasub","pair","paircode","qr","connect"].includes(lower)){text=`${prefix}${lower}`}}}    if (this.state.config.voiceAutoReplyEnabled !== false && !text.startsWith(prefix)) {
       const voiceMatch = adminStore.findMatchingVoiceReply(text);
       if (voiceMatch && voiceMatch.match) {
         const voiceReply = voiceMatch.match;
@@ -1780,7 +1906,147 @@ case"weather":{const query=args.trim()||"Colombo, Sri Lanka";await this.reply(ji
 case"time":case"date":{const now=new Date();const slTime=now.toLocaleTimeString("en-US",{timeZone:"Asia/Colombo",hour12:true});const slDate=now.toLocaleDateString("en-US",{timeZone:"Asia/Colombo",weekday:'long',year:'numeric',month:'long',day:'numeric'});await this.reply(jid,msg,`⏰ *TIME & DATE REPORT*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🕐 *Time:* ${slTime}\n📅 *Date:* ${slDate}\n🌐 *Timezone:* Asia/Colombo (Sri Lanka UTC+5:30)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_POWERED BY YASHI HALLS_ ⚡`);break}
 case"afk":{await this.reply(jid,msg,`💤 *AFK STATUS SET!* 🌙\n${args?`Reason: "${args}"`:"Owner is currently Away From Keyboard."}\nMessages will be attended to upon return.`);break}
 case"autorecord":{await this.sock?.sendPresenceUpdate("recording",jid).catch(()=>{});await this.reply(jid,msg,`🎙️ *Voice Recording Presence Activated!*`);break}
-case"antidelete":{await this.reply(jid,msg,`🛡️ *ANTI-DELETE SHIELD IS ACTIVE!* 🟢\nDeleted WhatsApp messages are monitored & logged.`);break}default:await this.reply(jid,msg,`\u2753 Unknown command: *${prefix}${command}*
+case"antidelete":{await this.reply(jid,msg,`🛡️ *ANTI-DELETE SHIELD IS ACTIVE!* 🟢\nDeleted WhatsApp messages are monitored & logged.`);break}case "guess": {
+  const secret = Math.floor(Math.random() * 100) + 1;
+  const userGuess = parseInt(args.trim());
+  if (isNaN(userGuess)) {
+    await this.reply(jid, msg, `🎲 *NUMBER GUESSING GAME (1-100)*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUsage: *${prefix}guess <number>* (e.g. *${prefix}guess 45*)\nGuess the secret number between 1 and 100!`);
+  } else if (userGuess === secret) {
+    await this.reply(jid, msg, `🎉 *BINGO! PERFECT GUESS!* 🏆\nThe secret number was *${secret}*! You earned +50 XP!`);
+  } else {
+    const diff = Math.abs(userGuess - secret);
+    const hint = userGuess < secret ? "Too LOW! 📈 Try higher." : "Too HIGH! 📉 Try lower.";
+    await this.reply(jid, msg, `❌ *Not quite!* ${hint}\nYour guess was ${diff > 20 ? "far off" : "very close"}! Try again with *${prefix}guess*!`);
+  }
+  break;
+}
+case "flip": {
+  const coin = Math.random() < 0.5 ? "🪙 HEADS (කාසිය උඩ)" : "🪙 TAILS (කාසිය යට)";
+  await this.reply(jid, msg, `🎲 *COIN TOSS RESULT*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nResult: *${coin}*!\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_POWERED BY YASHI HALLS_ ⚡`);
+  break;
+}
+case "roll": {
+  const dice = Math.floor(Math.random() * 6) + 1;
+  const diceEmojis = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+  await this.reply(jid, msg, `🎲 *DICE ROLL RESULT*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nYou rolled: *${dice}* ${diceEmojis[dice - 1]}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_POWERED BY YASHI HALLS_ ⚡`);
+  break;
+}
+case "bill": {
+  const units = parseFloat(args.trim()) || 0;
+  if (units <= 0) {
+    await this.reply(jid, msg, `💡 *CEB DOMESTIC ELECTRICITY BILL ESTIMATOR (LKR)*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUsage: *${prefix}bill <units>*\nExample: *${prefix}bill 120*`);
+    break;
+  }
+  let cost = 0;
+  if (units <= 30) cost = units * 8 + 150;
+  else if (units <= 60) cost = 30 * 8 + (units - 30) * 10 + 300;
+  else if (units <= 90) cost = 60 * 16 + (units - 60) * 16 + 400;
+  else if (units <= 120) cost = 60 * 16 + 30 * 16 + (units - 90) * 50 + 1000;
+  else cost = 60 * 16 + 30 * 16 + 30 * 50 + (units - 120) * 75 + 1500;
+  const sscL = cost * 0.025;
+  const vat = (cost + sscL) * 0.18;
+  const total = Math.round(cost + sscL + vat);
+  await this.reply(jid, msg, `⚡ *CEB ELECTRICITY BILL ESTIMATE (LKR)*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 *Consumed Units:* ${units} kWh\n💵 *Energy & Fixed Charge:* Rs. ${cost.toLocaleString()}\n🏛️ *SSCL (2.5%) & VAT (18%):* Rs. ${Math.round(sscL + vat).toLocaleString()}\n💰 *Estimated Total:* Rs. ${total.toLocaleString()} LKR\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Subject to latest CEB tariff rates._`);
+  break;
+}
+case "remind": {
+  if (!args.trim()) {
+    await this.reply(jid, msg, `⏰ *AUTOMATED REMINDER ALARM*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUsage: *${prefix}remind <minutes> <message>*\nExample: *${prefix}remind 10 Check cooking*`);
+    break;
+  }
+  const parts = args.trim().split(" ");
+  const mins = parseInt(parts[0]) || 5;
+  const reminderTask = parts.slice(1).join(" ") || "Reminder alert!";
+  await this.reply(jid, msg, `⏳ *Reminder set!* I will remind you about "${reminderTask}" in *${mins} minute(s)*. ⏰`);
+  setTimeout(() => {
+    this.sock?.sendMessage(jid, { text: `🚨 *REMINDER ALERT!* ⏰\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📌 *Task:* ${reminderTask}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Set ${mins}m ago by @${sender.split("@")[0]}_`, mentions: [sender] }).catch(() => {});
+  }, mins * 60000);
+  break;
+}
+case "lyrics": {
+  const songTitle = args.trim();
+  if (!songTitle) {
+    await this.reply(jid, msg, `🎵 *SONG LYRICS FINDER*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUsage: *${prefix}lyrics <song title>*\nExample: *${prefix}lyrics Faded Alan Walker*`);
+    break;
+  }
+  await this.reply(jid, msg, `🔎 *Searching lyrics for "${songTitle}"...*`);
+  const lyricsRes = await askGemini(`Find accurate full song lyrics for: "${songTitle}". Format with Title, Artist and Lyrics clearly.`);
+  await this.reply(jid, msg, `🎵 *SONG LYRICS: ${songTitle.toUpperCase()}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${lyricsRes.text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Powered by YASHI HALLS AI Lyrics_`);
+  break;
+}
+case "setstatus": {
+  if (!isOwner) {
+    await this.reply(jid, msg, `❌ *Access Denied:* Only bot owner can update WhatsApp status.`);
+    break;
+  }
+  const newStatus = args.trim() || "YASHI HALLS 24/7 Always Active ⚡";
+  try {
+    await this.sock?.updateProfileStatus(newStatus);
+    await this.reply(jid, msg, `✅ *WhatsApp Status/Bio updated to:* "${newStatus}" 🌟`);
+  } catch (err: any) {
+    await this.reply(jid, msg, `⚠️ Could not update status: ${err?.message || err}`);
+  }
+  break;
+}
+case "statusview": {
+  await this.reply(jid, msg, `👁️ *WHATSAPP STATUS VIEWER:* ${this.state.config.autoReadStatus ? "🟢 ACTIVE (Auto-Read ON)" : "🔴 INACTIVE"}\nToggle with *${prefix}autoread on/off*`);
+  break;
+}
+case "statussave":
+case "save": {
+  await this.reply(jid, msg, `💾 *STATUS / MEDIA SAVER:*\nReply to any viewed status update or photo with *${prefix}save* to download it to chat! 📥`);
+  break;
+}
+case "statusreact": {
+  await this.reply(jid, msg, `💖 *AUTO STATUS REACT:*\nConfigured to react with emojis: ❤️, 🔥, ⚡, 👍, 🌟\nToggle channel reacts with *${prefix}channelreact on/off*`);
+  break;
+}
+case "setname": {
+  if (!isOwner) {
+    await this.reply(jid, msg, `❌ *Access Denied:* Only bot owner can change bot name.`);
+    break;
+  }
+  if (!args.trim()) {
+    await this.reply(jid, msg, `Usage: *${prefix}setname <new bot name>*`);
+    break;
+  }
+  this.state.config.botName = args.trim();
+  this.saveConfig();
+  await this.reply(jid, msg, `✅ *Bot name changed to:* "${this.state.config.botName}" 👑`);
+  break;
+}
+case "setbio": {
+  if (!isOwner) {
+    await this.reply(jid, msg, `❌ *Access Denied:* Only bot owner can change bot bio.`);
+    break;
+  }
+  const bio = args.trim() || "YASHI HALLS MINI • 24/7 Automated Assistant";
+  try {
+    await this.sock?.updateProfileStatus(bio);
+    await this.reply(jid, msg, `✅ *WhatsApp Bio updated to:* "${bio}" 📝`);
+  } catch {
+    await this.reply(jid, msg, `⚠️ Could not update bio on WhatsApp.`);
+  }
+  break;
+}
+case "autoread": {
+  if (!isOwner) {
+    await this.reply(jid, msg, `❌ *Access Denied:* Only bot owner can change this setting.`);
+    break;
+  }
+  const val = args.toLowerCase().trim();
+  if (val === "on" || val === "true") {
+    this.state.config.autoReadStatus = true;
+  } else if (val === "off" || val === "false") {
+    this.state.config.autoReadStatus = false;
+  } else {
+    this.state.config.autoReadStatus = !this.state.config.autoReadStatus;
+  }
+  this.saveConfig();
+  await this.reply(jid, msg, `👁️ *Auto Status Read is now:* ${this.state.config.autoReadStatus ? "🟢 ON" : "🔴 OFF"}`);
+  break;
+}
+default:await this.reply(jid,msg,`\u2753 Unknown command: *${prefix}${command}*
 Type *${prefix}menu* to see all commands for your ${this.state.config.plan.toUpperCase()} plan.`);break}}catch(err){this.addLog("ERROR",`Error executing command '${command}': ${err?.message||err}`);await this.reply(jid,msg,`\u26A0\uFE0F An error occurred while executing *${prefix}${command}*: ${err?.message||"Internal error"}`)}}async reply(jid: string, quotedMsg: any, text: string) {
   if (!this.sock) return;
   try {
@@ -1820,118 +2086,133 @@ _POWERED BY YASHI HALLS_
   await this.reply(jid, quotedMsg, text);
 }
 
-async sendInteractiveButtonsOrFallback(jid: string, quotedMsg: any, content: any) {
-  if (!this.sock) return;
-  const botName = this.state.config.botName || 'YASHI HALLS';
-  const planName = (this.state.config.plan || 'PRO').toUpperCase();
-  const footer = content.footer || `⚡ ${botName} • [${planName} PLAN] • POWERED BY YASHI HALLS`;
-  let formattedText = content.text;
+async sendInteractiveButtonsOrFallback(
+    jid: string,
+    quotedMsg: any,
+    content: {
+      text: string;
+      interactiveText?: string;
+      fallbackText?: string;
+      title?: string;
+      subtitle?: string;
+      footer?: string;
+      image?: Buffer | string | { url: string } | null;
+      buttons?: Array<{ buttonId: string; buttonText: { displayText: string } }>;
+      sections?: Array<{ title: string; rows: Array<{ title: string; id: string; description?: string }> }>;
+      urls?: Array<{ displayText: string; url: string }>;
+      copyCodes?: Array<{ displayText: string; copyCode: string }>;
+      includeLogo?: boolean;
+    }
+  ) {
+    if (!this.sock) return;
+    const botName = this.state.config.botName || "YASHI HALLS MINI";
+    const planName = (this.state.config.plan || "MINI").toUpperCase();
+    const footer = content.footer || `⚡ ${botName} • [${planName} PLAN] • POWERED BY YASHI HALLS`;
+    const title = content.title || `👑 ${botName} • WA ASSISTANT 👑`;
 
-  if (content.sections && content.sections.length > 0) {
-    formattedText += `\n\n╭────── 🔘 *FEATURE DIRECTORY* ──────╮\n`;
-    for (const sec of content.sections) {
-      for (const r of sec.rows) {
-        formattedText += `│ 🔘 ⌈ *${r.title}* ⌋ ➔ ${r.id || r.rowId}\n`;
+    let imagePayload: any = content.image || null;
+    if (!imagePayload && content.includeLogo !== false) {
+      try {
+        imagePayload = await this.getLogoBuffer();
+      } catch {}
+    }
+
+    // 1. Try sending true WhatsApp Interactive NativeFlow message with zq_baileys_helper engine
+    try {
+      if (this.sock) {
+        await sendButtons(
+          this.sock,
+          jid,
+          {
+            title,
+            text: content.interactiveText || content.text,
+            footer,
+            image: imagePayload || undefined,
+            buttons: content.buttons,
+            sections: content.sections,
+            buttonText: "📂 SELECT MENU CATEGORY",
+            urls: content.urls,
+            copyCodes: content.copyCodes,
+          },
+          { quoted: quotedMsg }
+        );
+        this.addLog("INFO", `✅ Delivered ZQ native interactive buttons with header banner to ${jid.split("@")[0]}`);
+        return;
+      }
+    } catch (err: any) {
+      this.addLog("INFO", `Interactive native button notice: ${err?.message || err}. Delivering rich text fallback.`);
+    }
+
+    // 2. High-Fidelity Formatted Fallback with Bot Logo / Card Image
+    let formattedText = content.fallbackText || content.text;
+    if (content.sections && content.sections.length > 0) {
+      formattedText += `
+
+╭────── 🔘 *FEATURE DIRECTORY* ──────╮
+`;
+      for (const sec of content.sections) {
+        for (const r of sec.rows) {
+          formattedText += `│ 🔘 ⌈ *${r.title}* ⌋ ➔ ${r.id}
+`;
+        }
+      }
+      formattedText += `╰──────────────────────────────────╯`;
+    }
+    if (content.buttons && content.buttons.length > 0) {
+      formattedText += `
+
+╭────── ⚡ *QUICK ACTIONS* ──────╮
+`;
+      for (const b of content.buttons) {
+        formattedText += `│ ⚡ *${b.buttonText.displayText}* ➔ \`${b.buttonId}\`
+`;
+      }
+      formattedText += `╰──────────────────────────────────╯`;
+    }
+    if (content.copyCodes && content.copyCodes.length > 0) {
+      for (const cc of content.copyCodes) {
+        formattedText += `
+📋 *Copy:* \`${cc.copyCode}\``;
       }
     }
-    formattedText += `╰──────────────────────────────────╯`;
-  }
-  if (content.buttons && content.buttons.length > 0) {
-    formattedText += `\n\n╭────── ⚡ *QUICK ACTIONS* ──────╮\n`;
-    for (const b of content.buttons) {
-      formattedText += `│ 🔘 ⌈ *${b.buttonText.displayText}* ⌋ ➔ ${b.buttonId}\n`;
+    if (content.urls && content.urls.length > 0) {
+      for (const u of content.urls) {
+        formattedText += `
+🔗 *${u.displayText}:* ${u.url}`;
+      }
     }
-    formattedText += `╰──────────────────────────────────╯`;
-  }
-  if (content.copyCodes && content.copyCodes.length > 0) {
-    for (const cc of content.copyCodes) {
-      formattedText += `\n📋 *Copy:* \`${cc.copyCode}\``;
-    }
-  }
-  if (content.urls && content.urls.length > 0) {
-    for (const u of content.urls) {
-      formattedText += `\n🔗 *${u.displayText}:* ${u.url}`;
-    }
-  }
-  if (content.calls && content.calls.length > 0) {
-    for (const c of content.calls) {
-      formattedText += `\n📞 *${c.displayText}:* ${c.phoneNumber}`;
-    }
-  }
-  formattedText += `\n\n_${footer}_`;
+    formattedText += `
 
-  // Always attach the bot logo image when delivering the menu
-  if (content.includeLogo !== false) {
-    try {
-      const logoBuf = await this.getLogoBuffer();
-      if (logoBuf) {
-        const imagePayload = Buffer.isBuffer(logoBuf)
-          ? logoBuf
-          : (logoBuf as any)?.url
-          ? { url: (logoBuf as any).url }
-          : logoBuf;
+_${footer}_`;
 
+    if (imagePayload) {
+      try {
+        const finalImage = Buffer.isBuffer(imagePayload)
+          ? imagePayload
+          : (imagePayload as any)?.url
+          ? { url: (imagePayload as any).url }
+          : imagePayload;
         let sent = false;
         try {
           sent = await Promise.race([
             (async () => {
               try {
-                await this.sock.sendMessage(
-                  jid,
-                  { image: imagePayload, caption: formattedText },
-                  { quoted: quotedMsg }
-                );
+                await this.sock.sendMessage(jid, { image: finalImage, caption: formattedText }, { quoted: quotedMsg });
                 return true;
               } catch {
-                await this.sock.sendMessage(
-                  jid,
-                  { image: imagePayload, caption: formattedText }
-                );
+                await this.sock.sendMessage(jid, { image: finalImage, caption: formattedText });
                 return true;
               }
             })(),
-            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500))
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2500)),
           ]);
         } catch {}
-
-        if (sent) {
-          this.addLog("INFO", `✅ Delivered logo menu card to ${jid.split("@")[0]}`);
-          return;
-        }
-      }
-    } catch (imgErr: any) {
-      this.addLog("WARN", `Logo menu image deliver notice: ${imgErr?.message || imgErr}. Falling back to text...`);
+        if (sent) return;
+      } catch {}
     }
-  }
 
-  try {
-    await this.sock.sendMessage(
-      jid,
-      {
-        text: formattedText,
-        contextInfo: {
-          externalAdReply: {
-            title: `${botName} • OFFICIAL MENU`,
-            body: `⚡ ${planName} TIER • 24/7 Cloud Automated Engine`,
-            thumbnailUrl: BRAND_LOGO_URL,
-            sourceUrl: WHATSAPP_CHANNEL_URL,
-            mediaType: 1,
-            renderLargerThumbnail: true,
-          },
-        },
-      },
-      { quoted: quotedMsg }
-    );
-    this.addLog("INFO", `✅ Delivered text menu card to ${jid.split("@")[0]}`);
-  } catch (err: any) {
-    try {
-      await this.sock.sendMessage(jid, { text: formattedText });
-      this.addLog("INFO", `✅ Delivered plain text menu card to ${jid.split("@")[0]}`);
-    } catch (finalErr: any) {
-      this.addLog("ERROR", `Failed to deliver menu card to ${jid}: ${finalErr?.message || finalErr}`);
-    }
+    await this.reply(jid, quotedMsg, formattedText);
   }
-}
 
   async cmdMediaFire(jid: string, msg: any, urlArg: string) {
     const p = this.state.config.prefix;
@@ -2244,7 +2525,23 @@ _POWERED BY YASHI HALLS & CINERU.LK_
       this.addLog("ERROR", `Movie search error: ${err?.message || err}`);
       await this.reply(jid, msg, `❌ *Film Search Error:* ${err?.message || "Error occurred"}`);
     }
-  }  async getLogoBuffer() {
+  }
+
+  getConnectedUserName(): string {
+    const rawName = this.sock?.user?.name || (this.sock?.user as any)?.notify;
+    if (rawName && String(rawName).trim() && !['Akash Kavindu', 'YASHI HALLS'].includes(String(rawName).trim())) {
+      return String(rawName).trim();
+    }
+    if (this.state.pairedNumber && this.state.pairedNumber !== "Unknown") {
+      return `+${this.state.pairedNumber}`;
+    }
+    if (this.state.config.ownerName && !['Akash Kavindu'].includes(this.state.config.ownerName)) {
+      return this.state.config.ownerName;
+    }
+    return "User";
+  }
+
+  async getLogoBuffer() {
     const currentLogoUrl = this.state.config.botLogoUrl || BRAND_LOGO_URL;
 
     if (this.cachedLogoBuffer && this.lastCachedLogoUrl === currentLogoUrl) {
@@ -2252,11 +2549,16 @@ _POWERED BY YASHI HALLS & CINERU.LK_
     }
 
     const candidatePaths = [
-      path.resolve(process.cwd(), 'data', 'bot_logo_opt.jpg'),
-      '/data/bot_logo_opt.jpg',
-      '/app/applet/data/bot_logo_opt.jpg',
+      path.resolve(process.cwd(), 'data', 'bot_header_banner.png'),
+      path.resolve(process.cwd(), 'public', 'assets', 'bot_header_banner.png'),
+      '/data/bot_header_banner.png',
+      '/public/assets/bot_header_banner.png',
+      path.resolve(process.cwd(), 'public', 'assets', 'aistudio', 'file_00000000a5988208ba0d8759a81525b4_ee7e1d49.png'),
       path.resolve(process.cwd(), 'data', 'bot_logo.png'),
+      path.resolve(process.cwd(), 'data', 'bot_logo_opt.jpg'),
+      '/public/assets/aistudio/file_00000000a5988208ba0d8759a81525b4_ee7e1d49.png',
       '/data/bot_logo.png',
+      '/data/bot_logo_opt.jpg',
       '/app/applet/data/bot_logo.png',
     ];
 
@@ -2289,520 +2591,1025 @@ _POWERED BY YASHI HALLS & CINERU.LK_
   async cmdMenu(jid: string, msg: any, categoryArg?: string) {
     const p = this.state.config.prefix;
     const cat = (categoryArg || '').trim().toLowerCase();
-    const botName = this.state.config.botName || 'YASHI HALLS';
-    const plan = (this.state.config.plan || 'PRO').toUpperCase();
+    const botName = this.state.config.botName || 'YASHI HALLS MINI';
+    const plan = (this.state.config.plan || 'MINI').toUpperCase();
 
-    // CATEGORY 1: DOWNLOAD SUITE
-    if (cat === '1' || cat === 'download' || cat === 'downloads' || cat === 'dl' || cat === 'mediafire') {
-      const text = `
-╭───「 *DOWNLOAD SUITE* 」───╮
-│
-│ 🎵 *${p}song <title>*
-│    Download high-quality MP3 audio track
-│
-│ 🎬 *${p}video <title>*
-│    Download high-definition MP4 video clip
-│
-│ 📦 *${p}mediafire <url>*
-│    Direct cloud file downloader (Auto-detect)
-│
-│ 📱 *${p}tiktok <url>*
-│    TikTok HD video without watermark
-│
-│ 📘 *${p}fb <url>*
-│    Facebook public video (HD / SD)
-│
-│ 📸 *${p}ig <url>*
-│    Instagram Reels, Posts & Videos
-│
-│ 🐦 *${p}twitter <url>*
-│    Twitter / X video downloader
-│
-│ 📲 *${p}apk <app name>*
-│    Download Android APK package
-│
+    // 1. PROFILE & STATUS
+    if (cat === '1' || cat === 'profile' || cat === 'status' || cat === 'cat1') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "PROFILE & STATUS MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "STATUS", desc: "LIVE CONNECTION & STATS", capsule: `${p}status` },
+            { name: "SETSTATUS", desc: "UPDATE STATUS TEXT", capsule: `${p}setstatus <text>` },
+            { name: "STATUSVIEW", desc: "AUTO STATUS VIEWER", capsule: `${p}statusview` },
+            { name: "STATUSSAVE", desc: "SAVE VIEWED STATUS", capsule: `${p}statussave` },
+            { name: "STATUSREACT", desc: "AUTO EMOJI REACTIONS", capsule: `${p}statusreact` },
+            { name: "SETDP", desc: "CHANGE BOT PROFILE PICTURE", capsule: `${p}setdp` },
+            { name: "GETDP", desc: "DOWNLOAD USER PROFILE DP", capsule: `${p}getdp @user` },
+            { name: "SETNAME", desc: "CHANGE BOT DISPLAY NAME", capsule: `${p}setname <name>` },
+            { name: "SETBIO", desc: "UPDATE ABOUT / BIO DESCRIPTION", capsule: `${p}setbio <text>` },
+          ]
+        });
+      } catch (e) {}
+
+      const text = `╭───「 👤 PROFILE & STATUS MENU 」───╮
+│ 👑 Manage DP, Bio, Status & Identity
+╰────────────────────────────────────╯
+
+╭───〔 .status 〕───➤
+│ 📊 View live bot connection & system status
+│ 💡 Capsule: ${p}status
+╰──────────────────➤
+
+╭───〔 .setstatus 〕───➤
+│ ✍️ Update WhatsApp status text message
+│ 💡 Capsule: ${p}setstatus <text>
+╰──────────────────➤
+
+╭───〔 .statusview 〕───➤
+│ 👁️ Auto status viewer settings & logs
+│ 💡 Capsule: ${p}statusview
+╰──────────────────➤
+
+╭───〔 .statussave 〕───➤
+│ 💾 Save viewed status updates to chat
+│ 💡 Capsule: ${p}statussave
+╰──────────────────➤
+
+╭───〔 .statusreact 〕───➤
+│ 💖 Configure automated status emoji reacts
+│ 💡 Capsule: ${p}statusreact
+╰──────────────────➤
+
+╭───〔 .setdp 〕───➤
+│ 🖼️ Set bot profile picture to official logo
+│ 💡 Capsule: ${p}setdp
+╰──────────────────➤
+
+╭───〔 .getdp 〕───➤
+│ 📥 Download profile picture of mentioned user
+│ 💡 Capsule: ${p}getdp @user
+╰──────────────────➤
+
+╭───〔 .setname 〕───➤
+│ 🏷️ Set bot display name in configuration
+│ 💡 Capsule: ${p}setname <name>
+╰──────────────────➤
+
+╭───〔 .setbio 〕───➤
+│ 📝 Set WhatsApp About / Bio description
+│ 💡 Capsule: ${p}setbio <text>
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
+
+      await this.sendInteractiveButtonsOrFallback(jid, msg, {
+        text,
+        interactiveText: "✨ *PROFILE & STATUS MENU* ✨\nSelect an option below or tap a command:",
+        fallbackText: text,
+        title: "👤 PROFILE & STATUS MENU",
+        image: cardImg,
+        buttons: [
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } },
+          { buttonId: `${p}menu 2`, buttonText: { displayText: "📥 DOWNLOADS" } },
+          { buttonId: `${p}status`, buttonText: { displayText: "📊 .STATUS" } }
+        ],
+        sections: [
+          {
+            title: "👤 PROFILE & STATUS COMMANDS",
+            rows: [
+              { title: "📊 .STATUS", id: `${p}status`, description: "Live stats & connection uptime" },
+              { title: "✍️ .SETSTATUS", id: `${p}setstatus Active`, description: "Update status text" },
+              { title: "👁️ .STATUSVIEW", id: `${p}statusview`, description: "Auto status viewer" },
+              { title: "💾 .STATUSSAVE", id: `${p}statussave`, description: "Save viewed status" },
+              { title: "💖 .STATUSREACT", id: `${p}statusreact`, description: "Status emoji reactions" },
+              { title: "🖼️ .SETDP", id: `${p}setdp`, description: "Set profile picture to logo" },
+              { title: "📥 .GETDP", id: `${p}getdp`, description: "Download user DP" },
+              { title: "🏷️ .SETNAME", id: `${p}setname YASHI MINI`, description: "Set display name" },
+              { title: "📝 .SETBIO", id: `${p}setbio`, description: "Set About bio text" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}status`, copyCode: `${p}status` },
+          { displayText: `${p}setstatus`, copyCode: `${p}setstatus Active` }
+        ]
+      });
+      return;
+    }
+
+    // 2. DOWNLOAD
+    if (cat === '2' || cat === 'download' || cat === 'downloads' || cat === 'dl' || cat === 'mediafire' || cat === 'cat2') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "DOWNLOAD MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "SONG", desc: "HIGH QUALITY MP3 TRACK", capsule: `${p}song <title>` },
+            { name: "VIDEO", desc: "1080P HD MP4 VIDEO", capsule: `${p}video <title>` },
+            { name: "PLAY", desc: "FAST YOUTUBE MUSIC PLAYER", capsule: `${p}play <title>` },
+            { name: "AUDIO", desc: "WHATSAPP VOICE NOTE AUDIO", capsule: `${p}audio <title>` },
+            { name: "YTSEARCH", desc: "SEARCH YOUTUBE VIDEOS", capsule: `${p}ytsearch <query>` },
+            { name: "MF / MEDIAFIRE", desc: "DIRECT MEDIAFIRE (UP TO 2GB)", capsule: `${p}mf <url>` },
+            { name: "TT / TIKTOK", desc: "TIKTOK NO WATERMARK", capsule: `${p}tt <url>` },
+            { name: "FB", desc: "FACEBOOK HD / SD VIDEO", capsule: `${p}fb <url>` },
+            { name: "IG", desc: "INSTAGRAM REELS & POSTS", capsule: `${p}ig <url>` },
+            { name: "TWITTER", desc: "TWITTER / X HD VIDEO", capsule: `${p}twitter <url>` },
+            { name: "APK", desc: "DIRECT ANDROID APK FILE", capsule: `${p}apk <app>` },
+            { name: "LYRICS", desc: "SONG LYRICS & CHORDS", capsule: `${p}lyrics <song>` },
+          ]
+        });
+      } catch (e) {}
+
+      const text = `╭───「 📥 DOWNLOAD MENU 」───╮
+│ 🚀 High-Speed Direct Media Downloader
 ╰────────────────────────────╯
-💡 *Usage:* Type *${p}song Faded* or paste any MediaFire link.
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
+
+╭───〔 .song 〕───➤
+│ 🎵 Download high-quality MP3 audio track
+│ 💡 Capsule: ${p}song <title>
+╰──────────────────➤
+
+╭───〔 .video 〕───➤
+│ 🎬 Download high-definition MP4 video clip
+│ 💡 Capsule: ${p}video <title>
+╰──────────────────➤
+
+╭───〔 .play 〕───➤
+│ 🎧 Fast YouTube music player & downloader
+│ 💡 Capsule: ${p}play <title>
+╰──────────────────➤
+
+╭───〔 .audio 〕───➤
+│ 🎙️ Download audio as WhatsApp voice note
+│ 💡 Capsule: ${p}audio <title>
+╰──────────────────➤
+
+╭───〔 .ytsearch 〕───➤
+│ 🔎 Search YouTube videos with direct links
+│ 💡 Capsule: ${p}ytsearch <query>
+╰──────────────────➤
+
+╭───〔 .mf 〕───➤
+│ 📦 Direct MediaFire cloud file downloader (2GB Max)
+│ 💡 Capsule: ${p}mf <url>
+╰──────────────────➤
+
+╭───〔 .tt 〕───➤
+│ 📱 TikTok HD video without watermark
+│ 💡 Capsule: ${p}tt <url>
+╰──────────────────➤
+
+╭───〔 .fb 〕───➤
+│ 🌐 Facebook public video (HD / SD)
+│ 💡 Capsule: ${p}fb <url>
+╰──────────────────➤
+
+╭───〔 .ig 〕───➤
+│ 📸 Instagram Reels, Posts & Stories
+│ 💡 Capsule: ${p}ig <url>
+╰──────────────────➤
+
+╭───〔 .twitter 〕───➤
+│ 🐦 Twitter / X video downloader
+│ 💡 Capsule: ${p}twitter <url>
+╰──────────────────➤
+
+╭───〔 .apk 〕───➤
+│ 📲 Download Android APK application package
+│ 💡 Capsule: ${p}apk <app name>
+╰──────────────────➤
+
+╭───〔 .lyrics 〕───➤
+│ 📑 Instant song lyrics finder with chords
+│ 💡 Capsule: ${p}lyrics <song name>
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
 
       await this.sendInteractiveButtonsOrFallback(jid, msg, {
         text,
-        title: "📥 DOWNLOAD SUITE",
-        mode: "buttons",
+        interactiveText: "✨ *HIGH-SPEED MEDIA DOWNLOADER* ✨\nSelect a download command or category below:",
+        fallbackText: text,
+        title: "📥 DOWNLOAD MENU",
+        image: cardImg,
         buttons: [
-          { buttonId: `${p}menu movie`, buttonText: { displayText: "🎬 MOVIES" } },
-          { buttonId: `${p}menu ai`, buttonText: { displayText: "🤖 AI SUITE" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
+          { buttonId: `${p}song `, buttonText: { displayText: "🎵 .SONG" } },
+          { buttonId: `${p}video `, buttonText: { displayText: "🎬 .VIDEO" } },
+          { buttonId: `${p}mf `, buttonText: { displayText: "📦 .MF" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
         ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
+        sections: [
+          {
+            title: "📥 DOWNLOAD COMMANDS",
+            rows: [
+              { title: "🎵 .SONG", id: `${p}song `, description: "High quality MP3 audio" },
+              { title: "🎬 .VIDEO", id: `${p}video `, description: "1080P HD MP4 video" },
+              { title: "🎧 .PLAY", id: `${p}play `, description: "YouTube music player" },
+              { title: "🎙️ .AUDIO", id: `${p}audio `, description: "WhatsApp voice note" },
+              { title: "🔎 .YTSEARCH", id: `${p}ytsearch `, description: "Search YouTube" },
+              { title: "📦 .MF", id: `${p}mf `, description: "Direct MediaFire downloader" },
+              { title: "📱 .TT", id: `${p}tt `, description: "TikTok no watermark video" },
+              { title: "🌐 .FB", id: `${p}fb `, description: "Facebook HD/SD video" },
+              { title: "📸 .IG", id: `${p}ig `, description: "Instagram reels & posts" },
+              { title: "🐦 .TWITTER", id: `${p}twitter `, description: "Twitter/X video" },
+              { title: "📲 .APK", id: `${p}apk `, description: "Android APK downloader" },
+              { title: "📑 .LYRICS", id: `${p}lyrics `, description: "Song lyrics & chords" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}song`, copyCode: `${p}song Faded` },
+          { displayText: `${p}video`, copyCode: `${p}video Alan Walker` },
+          { displayText: `${p}mf`, copyCode: `${p}mf ` }
+        ]
       });
       return;
     }
 
-    // CATEGORY 2: MOVIES & CINEMA
-    if (cat === '2' || cat === 'movie' || cat === 'movies' || cat === 'film' || cat === 'films' || cat === 'filmdub' || cat === 'dub' || cat === 'sinhalasub' || cat === 'cinesubz') {
-      const text = `
-╭───「 *MOVIES & CINEMA (CINERU.LK)* 」───╮
-│
-│ 🇱🇰 *${p}cineru <name>*
-│    Cineru.lk movie search, cloud downloads & subtitles
-│
-│ 📦 *${p}cineru <franchise> set*
-│    Complete film sets (Harry Potter, Fast & Furious, etc.)
-│
-│ 🎬 *${p}film <name>*
-│    Search movies & direct streaming links
-│
-│ 🎙️ *${p}filmdub <name>*
-│    Sinhala dubbed movies, cartoons & series
-│
-│ 🍿 *${p}movie <name>*
-│    Movie details, cast, poster & IMDb rating
-│
-│ 🎥 *${p}cinesubz <name>*
-│    Cinesubz direct downloads & subtitles
-│
-│ 📝 *${p}sinhalasub <name>*
-│    Baiscope & Sinhala subtitles search
-│
-╰────────────────────────────────────────╯
-💡 *Usage:* Type *${p}film Avatar* or *${p}filmdub Kung Fu Panda*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
+    // 3. MOVIES & SUBTITLES
+    if (cat === '3' || cat === 'movie' || cat === 'movies' || cat === 'film' || cat === 'films' || cat === 'cineru' || cat === 'cat3') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "MOVIES & SUBTITLES MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "CINERU", desc: "CINERU.LK MOVIES & MIRRORS", capsule: `${p}cineru <name>` },
+            { name: "CINERU SET", desc: "COMPLETE FRANCHISE SETS", capsule: `${p}cineru <name> set` },
+            { name: "FILM", desc: "IMDB INFO & CLOUD MOVIES", capsule: `${p}film <name>` },
+            { name: "FILMDUB", desc: "SINHALA DUBBED MOVIES", capsule: `${p}filmdub <name>` },
+            { name: "CINESUBZ", desc: "CINESUBZ DIRECT DOWNLOADS", capsule: `${p}cinesubz <name>` },
+            { name: "SINHALASUB", desc: "BAISCOPE SINHALA SUBS", capsule: `${p}sinhalasub <name>` },
+          ]
+        });
+      } catch (e) {}
 
-      await this.sendInteractiveButtonsOrFallback(jid, msg, {
-        text,
-        title: "🎬 MOVIES & CINEMA",
-        mode: "buttons",
-        buttons: [
-          { buttonId: `${p}menu download`, buttonText: { displayText: "📥 DOWNLOADS" } },
-          { buttonId: `${p}menu ai`, buttonText: { displayText: "🤖 AI SUITE" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
-        ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
-      });
-      return;
-    }
-
-    // CATEGORY 3: AI & SMART SUITE
-    if (cat === '3' || cat === 'ai' || cat === 'gemini' || cat === 'voice' || cat === 'vision' || cat === 'tools') {
-      const text = `
-╭───「 *AI & SMART SUITE* 」───╮
-│
-│ 🤖 *${p}ai <prompt>*
-│    Ask anything with Google Gemini Flash AI
-│
-│ 🌐 *${p}translate <lang> <text>*
-│    Accurate multi-language translation
-│
-│ 📝 *${p}summarize <text/link>*
-│    Generate concise bullet-point summary
-│
-│ ✍️ *${p}write <topic>*
-│    Compose professional essays & letters
-│
-│ 💻 *${p}code <lang> <prompt>*
-│    Write, debug & explain code in 30+ languages
-│
-│ 🎨 *${p}imagine <prompt>*
-│    Generate photorealistic AI digital art
-│
-│ 🎙️ *${p}voicetrans <lang>* (reply to voice note)
-│    Translate spoken audio note to any language
-│
-│ 🎵 *${p}shazam* (reply to audio)
-│    Identify song title, artist & album
-│
-│ 🖼️ *${p}aisticker <prompt>*
-│    Create custom AI sticker instantly
-│
-│ 🧮 *${p}math <expression>*
-│    Step-by-step mathematical calculation
-│
-╰──────────────────────────────╯
-💡 *Usage:* Type *${p}ai Tell me a fun fact* or *${p}imagine Cyberpunk City*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
-
-      await this.sendInteractiveButtonsOrFallback(jid, msg, {
-        text,
-        title: "🤖 AI & SMART SUITE",
-        mode: "buttons",
-        buttons: [
-          { buttonId: `${p}menu download`, buttonText: { displayText: "📥 DOWNLOADS" } },
-          { buttonId: `${p}menu group`, buttonText: { displayText: "🛡️ GROUP TOOLS" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
-        ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
-      });
-      return;
-    }
-
-    // CATEGORY 4: GROUP MANAGEMENT
-    if (cat === '4' || cat === 'group' || cat === 'groups' || cat === 'admin' || cat === 'manage') {
-      const text = `
-╭───「 *GROUP MANAGEMENT* 」───╮
-│
-│ ℹ️ *${p}groupinfo*
-│    View group details, participants & permissions
-│
-│ 👑 *${p}admins*
-│    List all group administrators
-│
-│ 📢 *${p}tagall [message]*
-│    Mention every member in the group
-│
-│ 👻 *${p}hidetag [message]*
-│    Silent invisible broadcast mention [PRO]
-│
-│ 🚫 *${p}kick @user*
-│    Remove participant from group
-│
-│ ➕ *${p}add <phone number>*
-│    Add member to group
-│
-│ 🔒 *${p}mute* / *${p}unmute*
-│    Lock / unlock group messages for members
-│
-│ 🛡️ *${p}antilink <on/off>*
-│    Auto-delete link spam & kick offenders
-│
-│ ⚠️ *${p}warn @user* / *${p}warns* / *${p}resetwarn*
-│    Member warning system (3 warns = kick)
-│
-╰──────────────────────────────╯
-💡 *Usage:* Type *${p}tagall Urgent meeting now!*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
-
-      await this.sendInteractiveButtonsOrFallback(jid, msg, {
-        text,
-        title: "🛡️ GROUP MANAGEMENT",
-        mode: "buttons",
-        buttons: [
-          { buttonId: `${p}groupinfo`, buttonText: { displayText: "ℹ️ GROUP INFO" } },
-          { buttonId: `${p}admins`, buttonText: { displayText: "👑 ADMINS" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
-        ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
-      });
-      return;
-    }
-
-    // CATEGORY 5: GAMES & CASINO
-    if (cat === '5' || cat === 'game' || cat === 'games' || cat === 'fun' || cat === 'casino') {
-      const text = `
-╭───「 *GAMES & ENTERTAINMENT* 」───╮
-│
-│ 🧠 *${p}quiz*
-│    Answer trivia challenges to earn coins
-│
-│ 🎯 *${p}guess <1-10>*
-│    Guess the mystery secret number
-│
-│ 🎲 *${p}roll*
-│    Roll a 6-sided dice
-│
-│ 🪙 *${p}flip*
-│    Flip a coin (Heads or Tails)
-│
-│ 🎰 *${p}slot*
-│    Casino slot machine (Match 3 symbols to win)
-│
-│ 🏆 *${p}leaderboard*
-│    View top coin holders & rankings
-│
-╰──────────────────────────────────╯
-💡 *Usage:* Type *${p}quiz* or *${p}guess 7*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
-
-      await this.sendInteractiveButtonsOrFallback(jid, msg, {
-        text,
-        title: "🎮 GAMES & ENTERTAINMENT",
-        mode: "buttons",
-        buttons: [
-          { buttonId: `${p}quiz`, buttonText: { displayText: "🧠 PLAY QUIZ" } },
-          { buttonId: `${p}slot`, buttonText: { displayText: "🎰 PLAY SLOTS" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
-        ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
-      });
-      return;
-    }
-
-    // CATEGORY 6: BOT SETTINGS & TOGGLES
-    if (cat === '6' || cat === 'settings' || cat === 'setting' || cat === 'config' || cat === 'info' || cat === 'support') {
-      const text = `
-╭───「 *SETTINGS & CONFIGURATION* 」───╮
-│
-│ ⚡ *${p}ping*
-│    Test engine response speed & latency
-│
-│ 🔗 *${p}pair <number>*
-│    Get Pairing Code & QR to link WhatsApp bot
-│
-│ ⚙️ *${p}settings*
-│    View full bot status, quotas & plan info
-│
-│ 🤖 *${p}autochat <on/off>*
-│    Toggle AI smart conversational auto-reply
-│
-│ 🎙️ *${p}voicereply <on/off>*
-│    Toggle voice note auto-replies
-│
-│ ❤️ *${p}channelreact <on/off>*
-│    Toggle automatic emoji reactions on channel posts
-│
-│ 👑 *${p}owner*
-│    Bot creator details & support hotline
-│
+      const text = `╭───「 🎬 MOVIES & SUBTITLES MENU 」───╮
+│ 🍿 Cineru, Sinhala Subtitles & Dubbed Movies
 ╰──────────────────────────────────────╯
-💡 *Usage:* Type *${p}autochat off* or *${p}ping*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
+
+╭───〔 .cineru 〕───➤
+│ 🔎 Cineru.lk movie search & download mirrors
+│ 💡 Capsule: ${p}cineru <name>
+╰──────────────────➤
+
+╭───〔 .cineru set 〕───➤
+│ 🧙 Complete film franchise sets (Harry Potter, Fast & Furious)
+│ 💡 Capsule: ${p}cineru <name> set
+╰──────────────────➤
+
+╭───〔 .film 〕───➤
+│ 🎞️ Search movies, IMDb ratings, cast & streaming
+│ 💡 Capsule: ${p}film <name>
+╰──────────────────➤
+
+╭───〔 .filmdub 〕───➤
+│ 🎙️ Sinhala dubbed movies, cartoons & series
+│ 💡 Capsule: ${p}filmdub <name>
+╰──────────────────➤
+
+╭───〔 .cinesubz 〕───➤
+│ 🍿 Cinesubz direct downloads & Sinhala subs
+│ 💡 Capsule: ${p}cinesubz <name>
+╰──────────────────➤
+
+╭───〔 .sinhalasub 〕───➤
+│ 🇱🇰 Baiscope & Sinhala subtitles search (.srt/.zip)
+│ 💡 Capsule: ${p}sinhalasub <name>
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
 
       await this.sendInteractiveButtonsOrFallback(jid, msg, {
         text,
-        title: "⚙️ BOT SETTINGS",
-        mode: "buttons",
+        interactiveText: "✨ *MOVIES & SUBTITLES HUB* ✨\nSelect a movie command below:",
+        fallbackText: text,
+        title: "🎬 MOVIES & SUBTITLES MENU",
+        image: cardImg,
         buttons: [
-          { buttonId: `${p}ping`, buttonText: { displayText: "⚡ CHECK PING" } },
-          { buttonId: `${p}owner`, buttonText: { displayText: "👑 OWNER INFO" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
+          { buttonId: `${p}cineru harry potter set`, buttonText: { displayText: "🧙 HARRY POTTER SET" } },
+          { buttonId: `${p}cineru fast and furious set`, buttonText: { displayText: "🏎️ FAST & FURIOUS SET" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
         ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
+        sections: [
+          {
+            title: "🎬 MOVIE COMMANDS",
+            rows: [
+              { title: "🍿 .CINERU", id: `${p}cineru `, description: "Cineru.lk movie search" },
+              { title: "🧙 .CINERU SET", id: `${p}cineru harry potter set`, description: "Full franchise sets" },
+              { title: "🎞️ .FILM", id: `${p}film `, description: "IMDb movie info & download" },
+              { title: "🎙️ .FILMDUB", id: `${p}filmdub `, description: "Sinhala dubbed movies" },
+              { title: "🎬 .CINESUBZ", id: `${p}cinesubz `, description: "Cinesubz direct download" },
+              { title: "🇱🇰 .SINHALASUB", id: `${p}sinhalasub `, description: "Baiscope Sinhala subs" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "🌐 VISIT CINERU.LK", url: "https://cineru.lk/" },
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}cineru Deadpool`, copyCode: `${p}cineru Deadpool` },
+          { displayText: `${p}film Avatar`, copyCode: `${p}film Avatar` }
+        ]
       });
       return;
     }
 
-    // CATEGORY 7: DAILY & FINANCE
-    if (cat === '7' || cat === 'daily' || cat === 'finance' || cat === 'tools2') {
-      const text = `
-╭───「 *DAILY & FINANCE SUITE* 」───╮
-│
-│ 💰 *${p}gold*
-│    Live gold (24k/22k) & cryptocurrency rates
-│
-│ 🧾 *${p}bill <amount> <people>*
-│    Split restaurant or group bill with tax & tip
-│
-│ ⏰ *${p}remind <minutes> <reminder>*
-│    Set automatic timed reminder message
-│
-╰───────────────────────────────────╯
-💡 *Usage:* Type *${p}gold* or *${p}bill 4500 3*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
+    // 4. AI & SMART TOOLS
+    if (cat === '4' || cat === 'ai' || cat === 'gemini' || cat === 'tools' || cat === 'cat4') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "AI & SMART TOOLS MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "AI / GEMINI", desc: "GEMINI 2.5 FLASH ULTRA ASSISTANT", capsule: `${p}ai <prompt>` },
+            { name: "TRANSLATE", desc: "SINHALA & MULTILINGUAL AI", capsule: `${p}translate <lang> <text>` },
+            { name: "SUMMARIZE", desc: "DOCUMENT & ARTICLE SUMMARIZER", capsule: `${p}summarize <text>` },
+            { name: "WRITE", desc: "ESSAYS, EMAILS & SCRIPTS", capsule: `${p}write <prompt>` },
+            { name: "CODE", desc: "CODE GENERATOR & BUG FIXER", capsule: `${p}code <prompt>` },
+            { name: "IMAGINE", desc: "PHOTOREALISTIC AI ART", capsule: `${p}imagine <prompt>` },
+            { name: "OCR", desc: "IMAGE TEXT EXTRACTOR", capsule: `${p}ocr` },
+            { name: "STICKER", desc: "CONVERT IMAGE TO STICKER", capsule: `${p}sticker` },
+            { name: "VOICETRANS", desc: "VOICE NOTE TO SINHALA", capsule: `${p}voicetrans <lang>` },
+            { name: "SHAZAM", desc: "AUDIO SONG IDENTIFIER", capsule: `${p}shazam` },
+          ]
+        });
+      } catch (e) {}
+
+      const text = `╭───「 🤖 AI & SMART TOOLS MENU 」───╮
+│ 🧠 Google Gemini 2.5 Flash Ultra AI Suite
+╰────────────────────────────────────╯
+
+╭───〔 .ai 〕───➤
+│ 🤖 Google Gemini 2.5 Flash Ultra AI Assistant
+│ 💡 Capsule: ${p}ai <prompt>
+╰──────────────────➤
+
+╭───〔 .translate 〕───➤
+│ 🌐 AI Neural language translator (Sinhala / English)
+│ 💡 Capsule: ${p}translate <lang> <text>
+╰──────────────────➤
+
+╭───〔 .summarize 〕───➤
+│ 📑 AI document and article summarizer
+│ 💡 Capsule: ${p}summarize <text>
+╰──────────────────➤
+
+╭───〔 .write 〕───➤
+│ ✍️ AI content writer, essays, emails & scripts
+│ 💡 Capsule: ${p}write <prompt>
+╰──────────────────➤
+
+╭───〔 .code 〕───➤
+│ 💻 AI programming code generator & bug fixer
+│ 💡 Capsule: ${p}code <prompt>
+╰──────────────────➤
+
+╭───〔 .imagine 〕───➤
+│ 🎨 Generates high-definition AI images
+│ 💡 Capsule: ${p}imagine <prompt>
+╰──────────────────➤
+
+╭───〔 .ocr 〕───➤
+│ 👁️ Extracts text from images / documents
+│ 💡 Capsule: ${p}ocr (reply to photo)
+╰──────────────────➤
+
+╭───〔 .voicetrans 〕───➤
+│ 🎙️ Translates WhatsApp voice notes into Sinhala
+│ 💡 Capsule: ${p}voicetrans <lang>
+╰──────────────────➤
+
+╭───〔 .transcribe 〕───➤
+│ 📝 Converts audio / voice message to text
+│ 💡 Capsule: ${p}transcribe (reply to audio)
+╰──────────────────➤
+
+╭───〔 .shazam 〕───➤
+│ 🎵 Identify song name from recorded audio clip
+│ 💡 Capsule: ${p}shazam (reply to audio)
+╰──────────────────➤
+
+╭───〔 .aisticker 〕───➤
+│ 🪄 Creates custom stickers using AI generator
+│ 💡 Capsule: ${p}aisticker <prompt>
+╰──────────────────➤
+
+╭───〔 .sticker 〕───➤
+│ 🖼️ Converts any image or video into WhatsApp sticker
+│ 💡 Capsule: ${p}sticker (reply to media)
+╰──────────────────➤
+
+╭───〔 .math 〕───➤
+│ 🔢 Step-by-step mathematical problem solver
+│ 💡 Capsule: ${p}math <expression>
+╰──────────────────➤
+
+╭───〔 .cv 〕───➤
+│ 📄 Generates professional CV & Resume text
+│ 💡 Capsule: ${p}cv <details>
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
 
       await this.sendInteractiveButtonsOrFallback(jid, msg, {
         text,
-        title: "📊 DAILY & FINANCE",
-        mode: "buttons",
+        interactiveText: "✨ *AI & SMART TOOLS SUITE* ✨\nSelect an AI feature below:",
+        fallbackText: text,
+        title: "🤖 AI & SMART TOOLS MENU",
+        image: cardImg,
         buttons: [
-          { buttonId: `${p}gold`, buttonText: { displayText: "💰 GOLD RATES" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
+          { buttonId: `${p}ai `, buttonText: { displayText: "🤖 .AI" } },
+          { buttonId: `${p}sticker`, buttonText: { displayText: "🎨 .STICKER" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
         ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
+        sections: [
+          {
+            title: "🤖 AI & SMART TOOLS",
+            rows: [
+              { title: "🤖 .AI", id: `${p}ai `, description: "Gemini 2.5 Flash Ultra" },
+              { title: "🌐 .TRANSLATE", id: `${p}translate `, description: "Neural AI translator" },
+              { title: "📑 .SUMMARIZE", id: `${p}summarize `, description: "Document summarizer" },
+              { title: "✍️ .WRITE", id: `${p}write `, description: "AI content writer" },
+              { title: "💻 .CODE", id: `${p}code `, description: "AI code generator" },
+              { title: "🎨 .IMAGINE", id: `${p}imagine `, description: "Photorealistic AI art" },
+              { title: "👁️ .OCR", id: `${p}ocr`, description: "Extract text from image" },
+              { title: "🖼️ .STICKER", id: `${p}sticker`, description: "Image to sticker" },
+              { title: "🎙️ .VOICETRANS", id: `${p}voicetrans `, description: "Voice note to Sinhala" },
+              { title: "🎵 .SHAZAM", id: `${p}shazam`, description: "Audio song identifier" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}ai`, copyCode: `${p}ai ` },
+          { displayText: `${p}sticker`, copyCode: `${p}sticker` }
+        ]
       });
       return;
     }
 
-    // CATEGORY 8: BUSINESS & COMMERCE
-    if (cat === '8' || cat === 'business' || cat === 'shop' || cat === 'store') {
-      const text = `
-╭───「 *BUSINESS & COMMERCE* 」───╮
-│
-│ 🛍️ *${p}shop*
-│    Browse mini digital store & products
-│
-│ 🧾 *${p}invoice <amount> <client>*
-│    Generate professional digital invoice receipt
-│
-╰─────────────────────────────────╯
-💡 *Usage:* Type *${p}shop* or *${p}invoice 2500 John Doe*
-↩️ *Back to Menu:* Type *0* or *${p}menu*
-`.trim();
+    // 5. GROUP MANAGEMENT
+    if (cat === '5' || cat === 'group' || cat === 'groups' || cat === 'admin' || cat === 'cat5') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "GROUP MANAGEMENT MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "GROUPINFO", desc: "SECURITY & GROUP STATS", capsule: `${p}groupinfo` },
+            { name: "ADMINS", desc: "LIST GROUP ADMINISTRATORS", capsule: `${p}admins` },
+            { name: "TAGALL", desc: "MENTION ALL MEMBERS", capsule: `${p}tagall <msg>` },
+            { name: "HIDETAG", desc: "GHOST MENTION WITHOUT TEXT", capsule: `${p}hidetag <msg>` },
+            { name: "KICK", desc: "REMOVE GROUP PARTICIPANT", capsule: `${p}kick @user` },
+            { name: "ADD", desc: "ADD NUMBER TO GROUP", capsule: `${p}add <number>` },
+            { name: "PROMOTE", desc: "PROMOTE MEMBER TO ADMIN", capsule: `${p}promote @user` },
+            { name: "MUTE", desc: "LOCK CHAT FOR ADMINS ONLY", capsule: `${p}mute` },
+            { name: "ANTILINK", desc: "AUTO-KICK LINK SPAMMERS", capsule: `${p}antilink on/off` },
+            { name: "POLL", desc: "INTERACTIVE WHATSAPP POLL", capsule: `${p}poll Q | Opt1 | Opt2` },
+          ]
+        });
+      } catch (e) {}
+
+      const text = `╭───「 👥 GROUP MANAGEMENT MENU 」───╮
+│ 🛡️ Group Security, Admin Tools & Moderation
+╰────────────────────────────────────╯
+
+╭───〔 .groupinfo 〕───➤
+│ 📊 View group statistics, participants & security
+│ 💡 Capsule: ${p}groupinfo
+╰──────────────────➤
+
+╭───〔 .admins 〕───➤
+│ 👑 List all current group administrators
+│ 💡 Capsule: ${p}admins
+╰──────────────────➤
+
+╭───〔 .tagall 〕───➤
+│ 📢 Mentions every member in the group
+│ 💡 Capsule: ${p}tagall <message>
+╰──────────────────➤
+
+╭───〔 .hidetag 〕───➤
+│ 👻 Hidden ghost mention to all participants
+│ 💡 Capsule: ${p}hidetag <message>
+╰──────────────────➤
+
+╭───〔 .kick 〕───➤
+│ 🚫 Removes participant from group (Admin only)
+│ 💡 Capsule: ${p}kick @user
+╰──────────────────➤
+
+╭───〔 .add 〕───➤
+│ ➕ Adds phone number to group (Admin only)
+│ 💡 Capsule: ${p}add <number>
+╰──────────────────➤
+
+╭───〔 .promote 〕───➤
+│ 🔼 Promotes participant to Admin
+│ 💡 Capsule: ${p}promote @user
+╰──────────────────➤
+
+╭───〔 .demote 〕───➤
+│ 🔽 Demotes Admin to regular member
+│ 💡 Capsule: ${p}demote @user
+╰──────────────────➤
+
+╭───〔 .mute 〕───➤
+│ 🔒 Locks group so only Admins can send messages
+│ 💡 Capsule: ${p}mute
+╰──────────────────➤
+
+╭───〔 .unmute 〕───➤
+│ 🔓 Unlocks group for all participants
+│ 💡 Capsule: ${p}unmute
+╰──────────────────➤
+
+╭───〔 .link 〕───➤
+│ 🔗 Fetches the WhatsApp group invite link
+│ 💡 Capsule: ${p}link
+╰──────────────────➤
+
+╭───〔 .revoke 〕───➤
+│ 🔄 Resets group link to prevent unauthorized joins
+│ 💡 Capsule: ${p}revoke
+╰──────────────────➤
+
+╭───〔 .warn 〕───➤
+│ ⚠️ Issues an official warning strike to member
+│ 💡 Capsule: ${p}warn @user <reason>
+╰──────────────────➤
+
+╭───〔 .antilink 〕───➤
+│ 🛡️ Auto-deletes WhatsApp invite links & kicks violators
+│ 💡 Capsule: ${p}antilink on/off
+╰──────────────────➤
+
+╭───〔 .antispam 〕───➤
+│ ⚡ Flood protection shield against spammers
+│ 💡 Capsule: ${p}antispam on/off
+╰──────────────────➤
+
+╭───〔 .poll 〕───➤
+│ 📊 Creates an interactive WhatsApp group poll
+│ 💡 Capsule: ${p}poll Question | Opt1 | Opt2
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
 
       await this.sendInteractiveButtonsOrFallback(jid, msg, {
         text,
-        title: "💼 BUSINESS & COMMERCE",
-        mode: "buttons",
+        interactiveText: "✨ *GROUP MANAGEMENT SUITE* ✨\nSelect an admin command below:",
+        fallbackText: text,
+        title: "👥 GROUP MANAGEMENT MENU",
+        image: cardImg,
         buttons: [
-          { buttonId: `${p}shop`, buttonText: { displayText: "🛍️ OPEN SHOP" } },
-          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 MAIN MENU" } }
+          { buttonId: `${p}groupinfo`, buttonText: { displayText: "👥 GROUPINFO" } },
+          { buttonId: `${p}admins`, buttonText: { displayText: "👑 ADMINS" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
         ],
-        urls: [{ displayText: "📢 WHATSAPP CHANNEL", url: WHATSAPP_CHANNEL_URL }]
+        sections: [
+          {
+            title: "👥 GROUP ADMIN COMMANDS",
+            rows: [
+              { title: "📊 .GROUPINFO", id: `${p}groupinfo`, description: "Group stats & security" },
+              { title: "👑 .ADMINS", id: `${p}admins`, description: "List group admins" },
+              { title: "📢 .TAGALL", id: `${p}tagall`, description: "Mention all members" },
+              { title: "👻 .HIDETAG", id: `${p}hidetag`, description: "Hidden ghost mention" },
+              { title: "🚫 .KICK", id: `${p}kick`, description: "Remove participant" },
+              { title: "➕ .ADD", id: `${p}add`, description: "Add number to group" },
+              { title: "🔼 .PROMOTE", id: `${p}promote`, description: "Promote to admin" },
+              { title: "🔽 .DEMOTE", id: `${p}demote`, description: "Demote to member" },
+              { title: "🔒 .MUTE", id: `${p}mute`, description: "Lock chat for admins" },
+              { title: "🔓 .UNMUTE", id: `${p}unmute`, description: "Unlock chat for all" },
+              { title: "🔗 .LINK", id: `${p}link`, description: "Get group invite link" },
+              { title: "⚠️ .WARN", id: `${p}warn`, description: "Issue warning strike" },
+              { title: "🛡️ .ANTILINK", id: `${p}antilink on`, description: "Auto-kick link spammers" },
+              { title: "📊 .POLL", id: `${p}poll `, description: "Create group poll" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}tagall`, copyCode: `${p}tagall Hello everyone!` },
+          { displayText: `${p}groupinfo`, copyCode: `${p}groupinfo` }
+        ]
       });
       return;
     }
 
-    // DEFAULT: MASTER MAIN MENU (100% CLEAN, AESTHETIC ENGLISH)
-    const masterMenuText = `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
-┃       👑 *ＭＩＮＩ ＢＯＴ* 👑                                      
-┃   *${botName} • WA ASSISTANT*                          
-┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
-┃     ✨ *ALL COMMANDS MENU* ✨                         
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+    // 6. GAMES & FUN
+    if (cat === '6' || cat === 'game' || cat === 'games' || cat === 'fun' || cat === 'cat6') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "GAMES & FUN MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "QUIZ", desc: "TRIVIA WITH XP & REWARDS", capsule: `${p}quiz` },
+            { name: "GUESS", desc: "GUESS THE NUMBER 1-100", capsule: `${p}guess` },
+            { name: "ROLL", desc: "ROLL A 6-SIDED DICE", capsule: `${p}roll` },
+            { name: "FLIP", desc: "FLIP A LUCKY COIN", capsule: `${p}flip` },
+            { name: "SLOT", desc: "TRIPLE 777 CASINO SLOTS", capsule: `${p}slot` },
+            { name: "LEADERBOARD", desc: "TOP MEMBER RANKINGS", capsule: `${p}leaderboard` },
+            { name: "MEME", desc: "GENERATE CUSTOM MEMES", capsule: `${p}meme` },
+          ]
+        });
+      } catch (e) {}
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 👤 *1. PROFILE & STATUS*                                       
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}status
- ╰┈➤ ${p}setstatus <text>
- ╰┈➤ ${p}statusview
- ╰┈➤ ${p}statussave
- ╰┈➤ ${p}statusreact
- ╰┈➤ ${p}setdp
- ╰┈➤ ${p}getdp @user
- ╰┈➤ ${p}setname <name>
- ╰┈➤ ${p}setbio <text>
+      const text = `╭───「 🎮 GAMES & FUN MENU 」───╮
+│ 🎲 Interactive Trivia, Casino & Entertainment
+╰───────────────────────────────╯
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 📥 *2. DOWNLOAD*                                                     
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}song
- ╰┈➤ ${p}video
- ╰┈➤ ${p}play
- ╰┈➤ ${p}audio
- ╰┈➤ ${p}ytsearch
- ╰┈➤ ${p}mediafire / ${p}mf
- ╰┈➤ ${p}tiktok / ${p}tt
- ╰┈➤ ${p}fb
- ╰┈➤ ${p}ig
- ╰┈➤ ${p}twitter
- ╰┈➤ ${p}apk
- ╰┈➤ ${p}lyrics
+╭───〔 .quiz 〕───➤
+│ 🎯 Interactive trivia quiz with XP & Coin rewards
+│ 💡 Capsule: ${p}quiz
+╰──────────────────➤
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 🎬 *3. MOVIES & SUBTITLES*                                  
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}cineru
- ╰┈➤ ${p}cineru <name> set
- ╰┈➤ ${p}film / ${p}movie
- ╰┈➤ ${p}filmdub / ${p}dub / ${p}sinhaladub
- ╰┈➤ ${p}cinesubz
- ╰┈➤ ${p}sinhalasub
+╭───〔 .guess 〕───➤
+│ 🔢 Number guessing game (Guess 1 to 100)
+│ 💡 Capsule: ${p}guess
+╰──────────────────➤
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 🤖 *4. AI & SMART TOOLS*                                       
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}ai / ${p}ask / ${p}gemini
- ╰┈➤ ${p}translate / ${p}tr
- ╰┈➤ ${p}summarize
- ╰┈➤ ${p}write
- ╰┈➤ ${p}code
- ╰┈➤ ${p}imagine
- ╰┈➤ ${p}img
- ╰┈➤ ${p}ocr
- ╰┈➤ ${p}voicetrans
- ╰┈➤ ${p}transcribe / ${p}vtext
- ╰┈➤ ${p}shazam / ${p}findsong
- ╰┈➤ ${p}aisticker
- ╰┈➤ ${p}sticker / ${p}s
- ╰┈➤ ${p}math / ${p}solve
- ╰┈➤ ${p}cv / ${p}resume
- ╰┈➤ ${p}food / ${p}calorie
- ╰┈➤ ${p}filter
- ╰┈➤ ${p}meme
- ╰┈➤ ${p}quote
+╭───〔 .roll 〕───➤
+│ 🎲 Roll a 6-sided casino dice
+│ 💡 Capsule: ${p}roll
+╰──────────────────➤
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 👥 *5. GROUP MANAGEMENT*                                
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}groupinfo
- ╰┈➤ ${p}admins
- ╰┈➤ ${p}tagall / ${p}everyone
- ╰┈➤ ${p}hidetag
- ╰┈➤ ${p}kick / ${p}remove
- ╰┈➤ ${p}add
- ╰┈➤ ${p}promote
- ╰┈➤ ${p}demote
- ╰┈➤ ${p}mute / ${p}close
- ╰┈➤ ${p}unmute / ${p}open
- ╰┈➤ ${p}link / ${p}invite
- ╰┈➤ ${p}revoke
- ╰┈➤ ${p}setgroupname
- ╰┈➤ ${p}setdesc
- ╰┈➤ ${p}warn
- ╰┈➤ ${p}warns
- ╰┈➤ ${p}resetwarn
- ╰┈➤ ${p}antilink
- ╰┈➤ ${p}antispam
- ╰┈➤ ${p}welcome
- ╰┈➤ ${p}poll
+╭───〔 .flip 〕───➤
+│ 🪙 Flip a lucky coin (Heads or Tails)
+│ 💡 Capsule: ${p}flip
+╰──────────────────➤
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 🎮 *6. GAMES & FUN*                                                
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}quiz
- ╰┈➤ ${p}guess
- ╰┈➤ ${p}roll
- ╰┈➤ ${p}flip
- ╰┈➤ ${p}slot
- ╰┈➤ ${p}leaderboard / ${p}top
- ╰┈➤ ${p}meme
- ╰┈➤ ${p}quote
+╭───〔 .slot 〕───➤
+│ 🎰 Triple 777 Casino Slot Machine
+│ 💡 Capsule: ${p}slot
+╰──────────────────➤
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ⚙️ *7. BOT SETTINGS*                                               
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}menu
- ╰┈➤ ${p}ping
- ╰┈➤ ${p}alive
- ╰┈➤ ${p}uptime
- ╰┈➤ ${p}botinfo
- ╰┈➤ ${p}settings
- ╰┈➤ ${p}autochat
- ╰┈➤ ${p}voicereply
- ╰┈➤ ${p}channelreact
- ╰┈➤ ${p}public
- ╰┈➤ ${p}private
- ╰┈➤ ${p}setprefix
- ╰┈➤ ${p}setbotname
- ╰┈➤ ${p}setbotlogo
- ╰┈➤ ${p}owner
- ╰┈➤ ${p}broadcast
- ╰┈➤ ${p}restart
- ╰┈➤ ${p}autoreact
- ╰┈➤ ${p}antidelete
- ╰┈➤ ${p}autoread
- ╰┈➤ ${p}autorecord
- ╰┈➤ ${p}afk
- ╰┈➤ ${p}save
+╭───〔 .leaderboard 〕───➤
+│ 🏆 View top active members & XP rank list
+│ 💡 Capsule: ${p}leaderboard
+╰──────────────────➤
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ 💰 *8. DAILY & UTILITIES*                                         
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
- ╰┈➤ ${p}gold / ${p}crypto / ${p}rates
- ╰┈➤ ${p}bill
- ╰┈➤ ${p}remind
- ╰┈➤ ${p}weather
- ╰┈➤ ${p}time
- ╰┈➤ ${p}date
+╭───〔 .meme 〕───➤
+│ 🎭 Generate custom internet memes
+│ 💡 Capsule: ${p}meme <top> | <bottom>
+╰──────────────────➤
 
+╭───〔 .quote 〕───➤
+│ 📜 Generate beautiful aesthetic quote cards
+│ 💡 Capsule: ${p}quote <text>
+╰──────────────────➤
 
-> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`;
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
+
+      await this.sendInteractiveButtonsOrFallback(jid, msg, {
+        text,
+        interactiveText: "✨ *GAMES & ENTERTAINMENT* ✨\nSelect a mini-game below:",
+        fallbackText: text,
+        title: "🎮 GAMES & FUN MENU",
+        image: cardImg,
+        buttons: [
+          { buttonId: `${p}quiz`, buttonText: { displayText: "🎯 .QUIZ" } },
+          { buttonId: `${p}slot`, buttonText: { displayText: "🎰 .SLOT" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
+        ],
+        sections: [
+          {
+            title: "🎮 GAMES & FUN",
+            rows: [
+              { title: "🎯 .QUIZ", id: `${p}quiz`, description: "Trivia with XP rewards" },
+              { title: "🔢 .GUESS", id: `${p}guess`, description: "Number guessing game" },
+              { title: "🎲 .ROLL", id: `${p}roll`, description: "Roll 6-sided dice" },
+              { title: "🪙 .FLIP", id: `${p}flip`, description: "Flip a lucky coin" },
+              { title: "🎰 .SLOT", id: `${p}slot`, description: "Casino 777 slots" },
+              { title: "🏆 .LEADERBOARD", id: `${p}leaderboard`, description: "Top member rankings" },
+              { title: "🎭 .MEME", id: `${p}meme`, description: "Generate custom memes" },
+              { title: "📜 .QUOTE", id: `${p}quote`, description: "Aesthetic quote card" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}quiz`, copyCode: `${p}quiz` },
+          { displayText: `${p}slot`, copyCode: `${p}slot` }
+        ]
+      });
+      return;
+    }
+
+    // 7. BOT SETTINGS
+    if (cat === '7' || cat === 'settings' || cat === 'setting' || cat === 'config' || cat === 'cat7') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "BOT SETTINGS MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "PING", desc: "RESPONSE LATENCY TEST", capsule: `${p}ping` },
+            { name: "ALIVE", desc: "24/7 SYSTEM HEALTH & PLAN", capsule: `${p}alive` },
+            { name: "MENU", desc: "OPEN INTERACTIVE DASHBOARD", capsule: `${p}menu` },
+            { name: "AUTOCHAT", desc: "SMART AI AUTO REPLY", capsule: `${p}autochat` },
+            { name: "CHANNELREACT", desc: "AUTO REACT TO POSTS", capsule: `${p}channelreact` },
+            { name: "SETPREFIX", desc: "CHANGE BOT PREFIX", capsule: `${p}setprefix` },
+            { name: "RESTART", desc: "RECONNECT BAILEYS ENGINE", capsule: `${p}restart` },
+          ]
+        });
+      } catch (e) {}
+
+      const text = `╭───「 ⚙️ BOT SETTINGS MENU 」───╮
+│ 🔧 Configuration, Engine Diagnostics & Access
+╰────────────────────────────────╯
+
+╭───〔 .menu 〕───➤
+│ 📂 Display interactive dashboard & commands
+│ 💡 Capsule: ${p}menu
+╰──────────────────➤
+
+╭───〔 .ping 〕───➤
+│ ⚡ Speed test & response latency check
+│ 💡 Capsule: ${p}ping
+╰──────────────────➤
+
+╭───〔 .alive 〕───➤
+│ 🟢 Check 24/7 engine status & active plan
+│ 💡 Capsule: ${p}alive
+╰──────────────────➤
+
+╭───〔 .uptime 〕───➤
+│ ⏱️ View live uninterrupted uptime counter
+│ 💡 Capsule: ${p}uptime
+╰──────────────────➤
+
+╭───〔 .botinfo 〕───➤
+│ 💻 Complete server & engine specification
+│ 💡 Capsule: ${p}botinfo
+╰──────────────────➤
+
+╭───〔 .settings 〕───➤
+│ ⚙️ View active toggleable configuration
+│ 💡 Capsule: ${p}settings
+╰──────────────────➤
+
+╭───〔 .autochat 〕───➤
+│ 💬 Toggle Smart AI auto-reply in chats
+│ 💡 Capsule: ${p}autochat on/off
+╰──────────────────➤
+
+╭───〔 .voicereply 〕───➤
+│ 🎙️ Voice call auto-reject with Sinhala audio
+│ 💡 Capsule: ${p}voicereply on/off
+╰──────────────────➤
+
+╭───〔 .channelreact 〕───➤
+│ 💖 Automated emoji reactions on channels
+│ 💡 Capsule: ${p}channelreact on/off
+╰──────────────────➤
+
+╭───〔 .public / .private 〕───➤
+│ 🌐 Toggle bot access mode (Public vs Owner-only)
+│ 💡 Capsule: ${p}public or ${p}private
+╰──────────────────➤
+
+╭───〔 .setprefix 〕───➤
+│ 🔣 Change bot command prefix (e.g. . or ! or #)
+│ 💡 Capsule: ${p}setprefix <prefix>
+╰──────────────────➤
+
+╭───〔 .setbotname 〕───➤
+│ 🏷️ Customize bot title shown in messages
+│ 💡 Capsule: ${p}setbotname <name>
+╰──────────────────➤
+
+╭───〔 .owner 〕───➤
+│ 👑 Official developer & owner contact card
+│ 💡 Capsule: ${p}owner
+╰──────────────────➤
+
+╭───〔 .broadcast 〕───➤
+│ 📢 Broadcast announcement to all groups (Owner)
+│ 💡 Capsule: ${p}broadcast <message>
+╰──────────────────➤
+
+╭───〔 .restart 〕───➤
+│ 🔄 Clean restart Baileys connection engine
+│ 💡 Capsule: ${p}restart
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
+
+      await this.sendInteractiveButtonsOrFallback(jid, msg, {
+        text,
+        interactiveText: "✨ *BOT SETTINGS & CONFIG* ✨\nSelect a setting below:",
+        fallbackText: text,
+        title: "⚙️ BOT SETTINGS MENU",
+        image: cardImg,
+        buttons: [
+          { buttonId: `${p}ping`, buttonText: { displayText: "⚡ PING" } },
+          { buttonId: `${p}alive`, buttonText: { displayText: "🟢 ALIVE" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
+        ],
+        sections: [
+          {
+            title: "⚙️ BOT SETTINGS",
+            rows: [
+              { title: "⚡ .PING", id: `${p}ping`, description: "Latency speed test" },
+              { title: "🟢 .ALIVE", id: `${p}alive`, description: "System health status" },
+              { title: "⏱️ .UPTIME", id: `${p}uptime`, description: "Live uptime counter" },
+              { title: "💬 .AUTOCHAT", id: `${p}autochat on`, description: "Toggle AI auto-reply" },
+              { title: "🎙️ .VOICEREPLY", id: `${p}voicereply on`, description: "Voice call auto reject" },
+              { title: "💖 .CHANNELREACT", id: `${p}channelreact on`, description: "Channel auto reactions" },
+              { title: "🔣 .SETPREFIX", id: `${p}setprefix .`, description: "Change command prefix" },
+              { title: "👑 .OWNER", id: `${p}owner`, description: "Owner contact card" },
+              { title: "🔄 .RESTART", id: `${p}restart`, description: "Restart Baileys engine" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}ping`, copyCode: `${p}ping` },
+          { displayText: `${p}alive`, copyCode: `${p}alive` }
+        ]
+      });
+      return;
+    }
+
+    // 8. DAILY & UTILITIES
+    if (cat === '8' || cat === 'daily' || cat === 'util' || cat === 'utilities' || cat === 'cat8') {
+      let cardImg: Buffer | null = null;
+      try {
+        cardImg = await generateMenuCardImage({
+          title: "DAILY & UTILITIES MENU",
+          subtitle: "Tap to copy!",
+          cards: [
+            { name: "GOLD", desc: "LIVE 24K GOLD & USD RATES", capsule: `${p}gold` },
+            { name: "CRYPTO", desc: "BITCOIN & SOLANA PRICES", capsule: `${p}crypto` },
+            { name: "BILL", desc: "CEB BILL CALCULATOR IN LKR", capsule: `${p}bill` },
+            { name: "REMIND", desc: "SET AUTOMATED ALARM", capsule: `${p}remind` },
+            { name: "WEATHER", desc: "LIVE WEATHER REPORT", capsule: `${p}weather` },
+            { name: "TIME", desc: "SRI LANKA COLOMBO TIME", capsule: `${p}time` },
+          ]
+        });
+      } catch (e) {}
+
+      const text = `╭───「 🗓️ DAILY & UTILITIES MENU 」───╮
+│ 💰 Rates, Currency, Reminders & Forecasts
+╰────────────────────────────────────╯
+
+╭───〔 .gold 〕───➤
+│ 🪙 Live 24K Gold, USD, LKR & Bitcoin rates
+│ 💡 Capsule: ${p}gold
+╰──────────────────➤
+
+╭───〔 .crypto 〕───➤
+│ 📈 Real-time cryptocurrency market prices
+│ 💡 Capsule: ${p}crypto
+╰──────────────────➤
+
+╭───〔 .bill 〕───➤
+│ 💡 Calculate CEB Electricity & Water bills in LKR
+│ 💡 Capsule: ${p}bill <units>
+╰──────────────────➤
+
+╭───〔 .remind 〕───➤
+│ ⏰ Set an automated reminder alarm
+│ 💡 Capsule: ${p}remind <time> <task>
+╰──────────────────➤
+
+╭───〔 .weather 〕───➤
+│ 🌤️ Real-time weather forecast & climate report
+│ 💡 Capsule: ${p}weather <city>
+╰──────────────────➤
+
+╭───〔 .time 〕───➤
+│ 🕒 Current Sri Lanka (Asia/Colombo) time
+│ 💡 Capsule: ${p}time
+╰──────────────────➤
+
+╭───〔 .date 〕───➤
+│ 📅 Current calendar date & week day
+│ 💡 Capsule: ${p}date
+╰──────────────────➤
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
+
+      await this.sendInteractiveButtonsOrFallback(jid, msg, {
+        text,
+        interactiveText: "✨ *DAILY & UTILITIES* ✨\nSelect a utility command below:",
+        fallbackText: text,
+        title: "🗓️ DAILY & UTILITIES MENU",
+        image: cardImg,
+        buttons: [
+          { buttonId: `${p}gold`, buttonText: { displayText: "🪙 .GOLD" } },
+          { buttonId: `${p}weather colombo`, buttonText: { displayText: "🌤️ .WEATHER" } },
+          { buttonId: `${p}menu`, buttonText: { displayText: "🏠 ALL CATEGORIES" } }
+        ],
+        sections: [
+          {
+            title: "🗓️ DAILY & UTILITIES",
+            rows: [
+              { title: "🪙 .GOLD", id: `${p}gold`, description: "24K Gold & USD rates" },
+              { title: "📈 .CRYPTO", id: `${p}crypto`, description: "Bitcoin & Solana prices" },
+              { title: "💡 .BILL", id: `${p}bill 100`, description: "CEB electricity calculator" },
+              { title: "⏰ .REMIND", id: `${p}remind`, description: "Set automated alarm" },
+              { title: "🌤️ .WEATHER", id: `${p}weather colombo`, description: "Live weather report" },
+              { title: "🕒 .TIME", id: `${p}time`, description: "Sri Lanka Asia/Colombo time" },
+              { title: "📅 .DATE", id: `${p}date`, description: "Current calendar date" },
+            ]
+          }
+        ],
+        urls: [
+          { displayText: "📢 FOLLOW OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
+        ],
+        copyCodes: [
+          { displayText: `${p}gold`, copyCode: `${p}gold` },
+          { displayText: `${p}weather`, copyCode: `${p}weather colombo` }
+        ]
+      });
+      return;
+    }
+
+    // MAIN MENU (DEFAULT INTERACTIVE DASHBOARD)
+    const uptimeStr = this.formatUptime();
+    const latencyStr = `${Math.floor(this.state.lastPingMs || 15)}ms`;
+    const ownerName = this.getConnectedUserName();
+    const modeStr = (this.state.config.mode || 'public').toUpperCase();
+    const commandCount = 143;
+
+    const mainBody = `╭───〔 ${botName.toUpperCase().replace(/\s+/g, '-')} 〕───➤
+│ 👑 Owner : ${ownerName}
+│ ⚙️ Mode : ${modeStr}
+│ 🔣 Prefix : ${p}
+│ 📚 Commands : ${commandCount}
+╰────────────────────➤
+╭───〔 SYSTEM STATS 〕───➤
+│ ⏱️ Uptime : ${uptimeStr}
+│ 🚀 Latency : ${latencyStr}
+│ 💻 Platform : Linux (Cloud 24/7)
+│ 🤖 Version : 1.0.2
+╰────────────────────➤
+
+🔻 SELECT CATEGORY BELLOW
+
+> ⚡ *ＰＯＷＥＲＥＤ  ＢＹ   ＹＡＳＨＩ   ＨＡＬＬＳ*`.trim();
 
     await this.sendInteractiveButtonsOrFallback(jid, msg, {
-      text: masterMenuText,
-      title: `👑 MINI BOT • ALL COMMANDS MENU 👑`,
-      mode: "buttons",
+      text: mainBody,
+      interactiveText: `✨ *${botName.toUpperCase()} • WA ASSISTANT* ✨\nChoose a category or action below to see commands:`,
+      fallbackText: mainBody,
+      title: `👑 ${botName} • WA ASSISTANT 👑`,
+      includeLogo: true,
       buttons: [
-        { buttonId: `${p}ping`, buttonText: { displayText: "⚡ PING" } },
-        { buttonId: `${p}alive`, buttonText: { displayText: "🟢 ALIVE" } },
-        { buttonId: `${p}owner`, buttonText: { displayText: "👑 OWNER" } }
+        { buttonId: `${p}menu 1`, buttonText: { displayText: "💜 👤 PROFILE & STATUS" } },
+        { buttonId: `${p}menu 2`, buttonText: { displayText: "💜 📥 DOWNLOAD" } },
+        { buttonId: `${p}menu 3`, buttonText: { displayText: "💜 🎬 MOVIES & SUBS" } },
+        { buttonId: `${p}menu 4`, buttonText: { displayText: "💜 🧠 AI & SMART TOOLS" } },
+        { buttonId: `${p}menu 5`, buttonText: { displayText: "💜 👥 GROUP ADMIN" } },
+        { buttonId: `${p}menu 6`, buttonText: { displayText: "💜 🎮 GAMES & FUN" } },
+        { buttonId: `${p}menu 7`, buttonText: { displayText: "💜 ⚙️ BOT SETTINGS" } },
+        { buttonId: `${p}menu 8`, buttonText: { displayText: "💜 💰 DAILY & UTILITIES" } }
       ],
-      copyCodes: [
-        { displayText: "📋 Copy .menu", copyCode: `${p}menu` },
-        { displayText: "⚡ Copy .ping", copyCode: `${p}ping` }
+      sections: [
+        {
+          title: "📂 SELECT MENU CATEGORY",
+          rows: [
+            { title: "👤 1. PROFILE & STATUS", id: `${p}menu 1`, description: "Profile, DP, Bio & Status tools" },
+            { title: "📥 2. DOWNLOAD", id: `${p}menu 2`, description: "YouTube, TikTok, FB, IG, APK & Media" },
+            { title: "🎬 3. MOVIES & SUBTITLES", id: `${p}menu 3`, description: "Cineru, Sinhala Subtitles & Film search" },
+            { title: "🤖 4. AI & SMART TOOLS", id: `${p}menu 4`, description: "Gemini AI, Voice, Image & OCR tools" },
+            { title: "👥 5. GROUP MANAGEMENT", id: `${p}menu 5`, description: "Admins, Tagall, Mute, Warn & Group tools" },
+            { title: "🎮 6. GAMES & FUN", id: `${p}menu 6`, description: "Quiz, Roll, Flip, Slots & Mini games" },
+            { title: "⚙️ 7. BOT SETTINGS", id: `${p}menu 7`, description: "Prefix, AutoChat, Reactions & Config" },
+            { title: "💰 8. DAILY & UTILITIES", id: `${p}menu 8`, description: "Gold, Crypto, Rates, Remind & Weather" }
+          ]
+        }
       ],
       urls: [
         { displayText: "📢 OFFICIAL CHANNEL", url: WHATSAPP_CHANNEL_URL }
       ],
-      calls: [
-        { displayText: "📞 SUPPORT HOTLINE", phoneNumber: OWNER_HOTLINE }
+      copyCodes: [
+        { displayText: `${p}menu`, copyCode: `${p}menu` }
       ]
     });
   }

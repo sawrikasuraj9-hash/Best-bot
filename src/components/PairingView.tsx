@@ -23,6 +23,7 @@ import { useApp } from '../context/AppContext';
 import { APP_CONFIG } from '../data/initialData';
 import { soundFX } from '../utils/sound';
 import { normalizeWhatsAppNumber } from '../utils/phone';
+import { WhatsAppMenuInteractivePreview } from './WhatsAppMenuInteractivePreview';
 
 export const PairingView: React.FC = () => {
   const { 
@@ -259,16 +260,29 @@ export const PairingView: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 pt-1">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <button
               onClick={() => {
                 soundFX.playClick();
                 restartBot();
               }}
-              className="flex-1 py-2.5 rounded-xl bg-[#182635] hover:bg-[#203448] border border-cyan-500/30 text-cyan-300 font-bold text-xs uppercase flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              className="flex-1 py-2.5 px-3 rounded-xl bg-[#182635] hover:bg-[#203448] border border-cyan-500/30 text-cyan-300 font-bold text-xs uppercase flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Restart Socket</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                soundFX.playClick();
+                addToast('Unlinking session to pair new WhatsApp device...', 'info');
+                await handleClearSession();
+                setMode('pairCode');
+              }}
+              className="flex-1 py-2.5 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-bold text-xs uppercase flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Pair New Number</span>
             </button>
 
             <button
@@ -278,6 +292,11 @@ export const PairingView: React.FC = () => {
               <Trash2 className="w-3.5 h-3.5" />
               <span>Disconnect</span>
             </button>
+          </div>
+
+          {/* Interactive Menu & 2-Column Buttons Preview */}
+          <div className="pt-4 border-t border-[#1b2b3d]">
+            <WhatsAppMenuInteractivePreview />
           </div>
         </motion.div>
       ) : (
@@ -521,10 +540,25 @@ export const PairingView: React.FC = () => {
                     />
                   </div>
                 ) : (
-                  <div className="w-56 h-56 bg-slate-950 p-2 rounded-xl flex flex-col items-center justify-center relative overflow-hidden">
-                    <QrCode className="w-20 h-20 text-cyan-400/40 mb-2" />
-                    <RefreshCw className="w-6 h-6 text-cyan-400 animate-spin" />
-                    <span className="text-[11px] font-mono text-cyan-300 mt-2">Generating Baileys QR...</span>
+                  <div className="w-56 h-56 bg-slate-950 p-3 rounded-xl flex flex-col items-center justify-center relative overflow-hidden text-center space-y-2">
+                    <QrCode className="w-12 h-12 text-cyan-400/40" />
+                    <div className="flex items-center gap-1.5 text-cyan-300 text-xs font-mono font-bold">
+                      <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+                      <span>Generating QR...</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      Connecting to WhatsApp Gateway
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundFX.playClick();
+                        generateQrCode();
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-[11px] font-bold transition-all cursor-pointer"
+                    >
+                      ⚡ Refresh QR Now
+                    </button>
                   </div>
                 )}
               </div>
