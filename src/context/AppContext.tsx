@@ -515,6 +515,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [serverBotState?.isOnline]);
 
+  // Live Dynamic Custom CSS & Branding Injection from Admin Settings
+  useEffect(() => {
+    const applyLiveSiteDesign = async () => {
+      try {
+        const res = await fetch('/api/site-design');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            const { primaryColor, secondaryColor, accentColor, backgroundColor, cardBackgroundColor, customCss } = json.data;
+            let el = document.getElementById('yashi-admin-live-css') as HTMLStyleElement | null;
+            if (!el) {
+              el = document.createElement('style');
+              el.id = 'yashi-admin-live-css';
+              document.head.appendChild(el);
+            }
+            const rootVars = `
+:root {
+  --yashi-primary: ${primaryColor || '#00f0ff'};
+  --yashi-secondary: ${secondaryColor || '#a855f7'};
+  --yashi-accent: ${accentColor || '#3b82f6'};
+  --yashi-bg: ${backgroundColor || '#020612'};
+  --yashi-card-bg: ${cardBackgroundColor || '#060c18'};
+}
+`;
+            el.textContent = `${rootVars}\n${customCss || ''}`;
+          }
+        }
+      } catch (e) {
+        // quiet ignore
+      }
+    };
+
+    applyLiveSiteDesign();
+    const handleUpdate = () => applyLiveSiteDesign();
+    window.addEventListener('yashi-design-updated', handleUpdate);
+    return () => window.removeEventListener('yashi-design-updated', handleUpdate);
+  }, []);
+
   // Derived Real Bot Deployment based on Server Engine State
   const bots: BotDeployment[] = React.useMemo(() => {
     if (!serverBotState || serverBotState.connectionStatus === 'disconnected') {

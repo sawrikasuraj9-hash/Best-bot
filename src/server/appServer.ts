@@ -718,9 +718,70 @@ async function startServer() {
     }
   });
 
-  // ==========================================
-  // --- VOICE AUTO-REPLY MANAGER ENDPOINTS ---
-  // ==========================================
+  // Public Site Design Endpoint (used by Web Frontend & CSS Injector)
+  app.get('/api/site-design', (_req: Request, res: Response) => {
+    try {
+      const design = adminStore.getSiteDesign();
+      res.json({ success: true, data: design });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'Failed to get site design' });
+    }
+  });
+
+  // Admin Site Design & CSS Studio (Get & Update)
+  app.get('/api/admin/site-design', verifyAdmin, (_req: Request, res: Response) => {
+    try {
+      const design = adminStore.getSiteDesign();
+      res.json({ success: true, data: design });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'Failed to get site design' });
+    }
+  });
+
+  app.post('/api/admin/site-design', verifyAdmin, (req: Request, res: Response) => {
+    try {
+      const adminEmail = (req as any).adminEmail;
+      const updated = adminStore.updateSiteDesign(req.body, adminEmail);
+      res.json({ success: true, data: updated, message: 'Website Design & CSS updated successfully!' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'Failed to update site design' });
+    }
+  });
+
+  // Admin Bot Studio & Commands Engine (Get & Update)
+  app.get('/api/admin/bot-studio', verifyAdmin, (_req: Request, res: Response) => {
+    try {
+      const studio = adminStore.getBotStudio();
+      res.json({ success: true, data: studio });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'Failed to get bot studio' });
+    }
+  });
+
+  app.post('/api/admin/bot-studio', verifyAdmin, (req: Request, res: Response) => {
+    try {
+      const adminEmail = (req as any).adminEmail;
+      const updated = adminStore.updateBotStudio(req.body, adminEmail);
+      
+      // Hot-apply changes to active BotEngine
+      try {
+        const engine = getEngineForReq(req);
+        engine.updateConfig({
+          botName: updated.botName,
+          botLogoUrl: updated.botLogoUrl,
+          prefix: updated.prefix,
+          ownerNumber: updated.ownerNumber,
+          ...(updated.featureFlags || {})
+        });
+      } catch (engineErr) {
+        console.warn('[AppServer] Hot-sync to active bot engine warning:', engineErr);
+      }
+
+      res.json({ success: true, data: updated, message: 'Bot Engine & Commands Studio saved successfully!' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'Failed to update bot studio' });
+    }
+  });
 
   // 1. Audio Streaming Endpoint (supports HTTP 206 Partial Content Range for smooth browser playback & seeking)
   app.get('/api/voice-replies/audio/:id', (req: Request, res: Response) => {
@@ -1020,6 +1081,9 @@ async function startServer() {
       res.json({ success: true, voiceAutoReplyEnabled: updated.voiceAutoReplyEnabled });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err?.message || 'Failed to toggle voice auto reply' });
+    }
+  });
+
   // --- INTERACTIVE NEON WEB MENU UI ---
   app.get(['/menu', '/menu.html'], (req: Request, res: Response) => {
     const menuFilePath = path.resolve(rootDir, 'public', 'menu.html');

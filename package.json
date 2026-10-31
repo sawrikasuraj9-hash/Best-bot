@@ -15,6 +15,7 @@
     "@google/genai": "^2.4.0",
     "@mrnima/facebook-downloader": "^1.0.0",
     "@mrnima/instagram-downloader": "^1.0.0",
+    "@sasa-dev/void-baileys": "^2.4.0",
     "@sl-code-lords/youtube-dl": "^1.0.4",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",

@@ -26,7 +26,9 @@ import {
   Tag,
   Building2,
   Crown,
-  Mic
+  Mic,
+  Palette,
+  Cpu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useApp } from '../context/AppContext';
@@ -38,9 +40,11 @@ import {
   AdminOverviewStats 
 } from '../types';
 import { VoiceAutoRepliesAdmin } from './VoiceAutoRepliesAdmin';
+import { AdminSiteDesignStudio } from './AdminSiteDesignStudio';
+import { AdminBotStudio } from './AdminBotStudio';
 import { db, collection, getDocs, updateDoc, doc, getDoc } from '../firebase';
 
-type AdminTab = 'overview' | 'customers' | 'wallet' | 'plans' | 'purchases' | 'voice' | 'settings' | 'audit';
+type AdminTab = 'overview' | 'customers' | 'wallet' | 'plans' | 'purchases' | 'voice' | 'site-design' | 'bot-studio' | 'settings' | 'audit';
 
 export const AdminPanelView: React.FC = () => {
   const { user, isAdmin, addToast } = useApp();
@@ -458,6 +462,8 @@ export const AdminPanelView: React.FC = () => {
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
         {[
           { id: 'overview', label: 'Overview', icon: Activity },
+          { id: 'site-design', label: '🎨 Site Design & CSS', icon: Palette },
+          { id: 'bot-studio', label: '🤖 Bot & Baileys Studio', icon: Bot },
           { id: 'customers', label: `Customers (${customers.length})`, icon: Users },
           { id: 'wallet', label: 'Wallet & Coins', icon: Coins },
           { id: 'purchases', label: `Purchases (${purchases.filter(p => p.status === 'PENDING').length} Pending)`, icon: ShoppingBag },
@@ -1005,6 +1011,22 @@ export const AdminPanelView: React.FC = () => {
           userEmail={user.email}
           addToast={addToast}
           customers={customers}
+        />
+      )}
+
+      {/* TAB: WEBSITE DESIGN & CSS STUDIO */}
+      {activeTab === 'site-design' && (
+        <AdminSiteDesignStudio
+          adminEmail={user.email || 'sawrikasuraj759@gmail.com'}
+          addToast={addToast}
+        />
+      )}
+
+      {/* TAB: BOT ENGINE, BAILEYS & COMMAND STUDIO */}
+      {activeTab === 'bot-studio' && (
+        <AdminBotStudio
+          adminEmail={user.email || 'sawrikasuraj759@gmail.com'}
+          addToast={addToast}
         />
       )}
 

@@ -5,6 +5,78 @@ import { seedDefaultVoiceFiles } from "./voiceService";
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const DB_FILE = path.resolve(DATA_DIR, "admin_system_db.json");
 
+const DEFAULT_SITE_DESIGN = {
+  brandName: "YASHI HALLS",
+  brandTagline: "Professional Cyber Multi-Device WhatsApp Cloud Engine",
+  logoUrl: "https://i.ibb.co/gM1MwL9T/IMG-20261024-WA0008.jpg",
+  primaryColor: "#00f0ff",
+  secondaryColor: "#a855f7",
+  accentColor: "#3b82f6",
+  backgroundColor: "#020612",
+  cardBackgroundColor: "#060c18",
+  hologramTitle: "CYBER CORE ACTIVE",
+  hologramSubtitle: "24/7 Autonomous WhatsApp Cloud Engine",
+  customCss: `/* YASHI HALLS Custom Site Styling */
+.cyber-glow-custom {
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.4);
+}
+`,
+  footerCopyright: "© 2026 YASHI HALLS Engine. All Rights Reserved."
+};
+
+const DEFAULT_BOT_STUDIO = {
+  botName: "YASHI HALLS MINI",
+  botLogoUrl: "https://i.ibb.co/gM1MwL9T/IMG-20261024-WA0008.jpg",
+  prefix: ".",
+  ownerNumber: "94740712934",
+  ownerName: "Sawrika Suraj",
+  baileysVersion: "2.3000.1017531287",
+  browserName: "Chrome (Ubuntu)",
+  channelUrl: "https://whatsapp.com/channel/0029Vb927N4GJP8MS1yurM2Z",
+  menuHeader: "🌟 *WELCOME TO YASHI MALLS BOT!* 🌟\n\nHi there! I am here to make your WhatsApp experience easier, faster, and more fun.\n\nChoose an option from the menu list below to get started!",
+  menuFooter: "POWERED BY YASHI MALLS",
+  buttonText: "📋 CLICK TO OPEN MENU",
+  categories: [
+    { id: "download", title: "📥 Download Menu", command: ".download", description: "Download videos, audio & files" },
+    { id: "ai", title: "🧠 AI Commands", command: ".ai", description: "Chat & AI features" },
+    { id: "group", title: "👥 Group Manage", command: ".group", description: "Manage group settings" },
+    { id: "admin", title: "⚙️ Admin Menu", command: ".admin", description: "Admin tools and controls" },
+    { id: "tools", title: "🛠️ Tools & Edits", command: ".tools", description: "Editing and utility tools" },
+    { id: "owner", title: "👑 Owner Area", command: ".owner", description: "Owner-only commands" },
+    { id: "other", title: "📂 Other Cmds", command: ".other", description: "Other bot commands" },
+    { id: "music", title: "🎵 Song & Music", command: ".music", description: "Search and play songs" },
+    { id: "aiimage", title: "🖼️ AI Image Menu", command: ".aiimage", description: "Generate AI images" },
+    { id: "movies", title: "🎬 Movies & TV", command: ".movies", description: "Download TV series & movies" },
+    { id: "premium", title: "💎 Premium Menu", command: ".premium", description: "Special VIP features" },
+    { id: "texttools", title: "✍️ Text Tools", command: ".texttools", description: "Text formatting & fonts" },
+    { id: "utility", title: "🧩 Utility Menu", command: ".utility", description: "Daily utility features" },
+    { id: "games", title: "🎮 Fun & Games", command: ".games", description: "Mini games & fun" },
+    { id: "math", title: "📊 Math & Dev", command: ".math", description: "Calculations and dev tools" }
+  ],
+  customCommands: [
+    {
+      id: "cmd-rules",
+      trigger: "rules",
+      replyText: "📜 *YASHI HALLS RULES:*\n1. No spamming in groups\n2. Respect admins\n3. Enjoy high-speed downloads!",
+      enabled: true
+    },
+    {
+      id: "cmd-support",
+      trigger: "support",
+      replyText: "📞 *YASHI HALLS OFFICIAL SUPPORT:*\nContact Developer: +94740712934\nOfficial Channel: https://whatsapp.com/channel/0029Vb927N4GJP8MS1yurM2Z",
+      enabled: true
+    }
+  ],
+  featureFlags: {
+    antiLink: true,
+    antiSpam: true,
+    autoReadStatus: true,
+    callDetectorEnabled: true,
+    channelAutoReact: false,
+    smartAutoReply: false
+  }
+};
+
 const DEFAULT_SETTINGS = {
   storeName: "YASHI HALLS Cloud Platform",
   brandTagline: "Professional Cyber Multi-Device WhatsApp Engine",
@@ -12,7 +84,9 @@ const DEFAULT_SETTINGS = {
   maintenanceMode: false,
   allowPublicSignups: true,
   planPricesCoins: { mini: 0, pro: 10, business: 30 },
-  coinPackPricesLkr: { basic: 450, popular: 1200, mega: 2800 }
+  coinPackPricesLkr: { basic: 450, popular: 1200, mega: 2800 },
+  siteDesign: DEFAULT_SITE_DESIGN,
+  botStudio: DEFAULT_BOT_STUDIO
 };
 
 const DEFAULT_DB = {
@@ -206,14 +280,43 @@ class AdminStore {
   }
 
   getSettings() {
+    if (!this.db.settings) this.db.settings = { ...DEFAULT_SETTINGS };
+    if (!this.db.settings.siteDesign) this.db.settings.siteDesign = { ...DEFAULT_SITE_DESIGN };
+    if (!this.db.settings.botStudio) this.db.settings.botStudio = { ...DEFAULT_BOT_STUDIO };
     return { ...this.db.settings };
   }
 
   updateSettings(partial: any, adminEmail: string) {
-    this.db.settings = { ...this.db.settings, ...partial };
+    this.db.settings = { ...this.getSettings(), ...partial };
     this.addAuditLog(adminEmail, "UPDATE_SETTINGS", `Updated system configuration: ${Object.keys(partial).join(", ")}`);
     this.saveDatabase(this.db);
     return this.getSettings();
+  }
+
+  getSiteDesign() {
+    const s = this.getSettings();
+    return s.siteDesign || { ...DEFAULT_SITE_DESIGN };
+  }
+
+  updateSiteDesign(partial: any, adminEmail: string) {
+    const current = this.getSiteDesign();
+    const updated = { ...current, ...partial };
+    this.updateSettings({ siteDesign: updated }, adminEmail);
+    this.addAuditLog(adminEmail, "UPDATE_SITE_DESIGN", `Updated Website Design & Theme Code: ${Object.keys(partial).join(", ")}`);
+    return updated;
+  }
+
+  getBotStudio() {
+    const s = this.getSettings();
+    return s.botStudio || { ...DEFAULT_BOT_STUDIO };
+  }
+
+  updateBotStudio(partial: any, adminEmail: string) {
+    const current = this.getBotStudio();
+    const updated = { ...current, ...partial };
+    this.updateSettings({ botStudio: updated }, adminEmail);
+    this.addAuditLog(adminEmail, "UPDATE_BOT_STUDIO", `Updated Bot Engine, Baileys & Commands: ${Object.keys(partial).join(", ")}`);
+    return updated;
   }
 
   getCustomers() {
